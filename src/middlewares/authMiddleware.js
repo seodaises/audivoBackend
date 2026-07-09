@@ -3,15 +3,16 @@ const db = require('../models');
 const ApiError = require('../utils/ApiError');
 const { verifyToken } = require('../utils/jwt');
 const catchAsync = require('../utils/catchAsync');
+const { COOKIE_NAME } = require('../utils/authCookie');
 
 const protect = catchAsync(async (req, res, next) => {
-  const header = req.headers.authorization;
+  // Token now travels in an httpOnly cookie (set at login), not the
+  // Authorization header. cookie-parser populates req.cookies.
+  const token = req.cookies ? req.cookies[COOKIE_NAME] : undefined;
 
-  if (!header || !header.startsWith('Bearer ')) {
-    throw new ApiError(401, 'Not authenticated — Bearer token required');
+  if (!token) {
+    throw new ApiError(401, 'Not authenticated — no session cookie');
   }
-
-  const token = header.split(' ')[1];
 
   let payload;
   try {
@@ -44,3 +45,4 @@ const protect = catchAsync(async (req, res, next) => {
 });
 
 module.exports = { protect };
+

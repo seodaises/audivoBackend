@@ -3,6 +3,11 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const { protect } = require('../middlewares/authMiddleware');
+const noCache = require('../middlewares/noCache');
+
+// Auth responses are session-sensitive — never let the browser cache them
+// (a stale cached /auth/me returns 304 and can log a valid user out on refresh).
+router.use(noCache);
 
 // POST /api/auth/register  — create account, sends verification email
 router.post('/register', authController.register);

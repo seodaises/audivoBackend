@@ -3,6 +3,7 @@ const authService = require('../services/authService');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
 const ApiError = require('../utils/ApiError');
+const { setAuthCookie, clearAuthCookie } = require('../utils/authCookie');
 
 const register = catchAsync(async (req, res) => {
   const { email, password, displayName, username, role } = req.body || {};
@@ -24,7 +25,12 @@ const login = catchAsync(async (req, res) => {
     ipAddress: req.ip,
     userAgent: req.headers['user-agent'],
   });
-  return success(res, 200, 'Login successful', result);
+
+  // result is { token, user }. The token now goes into an httpOnly cookie
+  // instead of the JSON body, so client-side JS never sees it (XSS-safe).
+  // Only the user object is returned to the frontend.
+  setAuthCookie(res, result.token);
+  return success(res, 200, 'Login successful', { user: result.user });
 });
 
 const loginHistory = catchAsync(async (req, res) => {
@@ -52,6 +58,9 @@ const resendVerification = catchAsync(async (req, res) => {
 });
 
 const logout = catchAsync(async (req, res) => {
+  // Clear the httpOnly auth cookie. Options must match those used to set it
+  // (handled inside clearAuthCookie) or the browser won't remove it.
+  clearAuthCookie(res);
   return success(res, 200, 'Logged out successfully', null);
 });
 
@@ -114,6 +123,9 @@ const changeUsername = catchAsync(async (req, res) => {
 const deleteMe = catchAsync(async (req, res) => {
   const { password } = req.body || {};
   const result = await authService.deleteMe({ userId: req.user.id, password });
+  // The account is gone; clear the now-useless auth cookie so it doesn't
+  // linger in the browser until natural expiry.
+  clearAuthCookie(res);
   return success(res, 200, 'Account deleted', result);
 });
 
