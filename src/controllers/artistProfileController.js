@@ -4,8 +4,7 @@ const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
 const ApiError = require('../utils/ApiError');
 
-// POST /api/artist/profile  — the logged-in user establishes their artist presence.
-// Verified-artist gate + "one profile per user" rule live in the service.
+// POST /api/artist/profile  — the logged-in user establishes their artist presence. Verified-artist gate + "one profile per user" rule live in the service.
 const createMyProfile = catchAsync(async (req, res) => {
   const { stageName, bio, avatarUrl } = req.body || {};
   if (!stageName) throw new ApiError(400, 'stageName is required');
@@ -37,6 +36,12 @@ const getMyProfile = catchAsync(async (req, res) => {
   return success(res, 200, 'Artist profile retrieved', result);
 });
 
+// GET /api/artist/catalog  — the logged-in artist's OWN songs + albums, ALL statuses (the Library page). Returns an empty catalog (not an error) if the user isn't an artist yet.
+const getMyCatalog = catchAsync(async (req, res) => {
+  const result = await artistProfileService.getMyCatalog({ actor: req.user });
+  return success(res, 200, 'Catalog retrieved', result);
+});
+
 // GET /api/artists/:username  — public artist page: profile + PUBLISHED catalog only.
 const getPublicProfile = catchAsync(async (req, res) => {
   const { username } = req.params;
@@ -48,5 +53,6 @@ module.exports = {
   createMyProfile,
   updateMyProfile,
   getMyProfile,
+  getMyCatalog,
   getPublicProfile,
 };

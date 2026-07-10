@@ -16,7 +16,11 @@ const browseSongs = async ({ page, limit, genre } = {}) => {
   const { safeLimit, safePage, offset } = paginate({ page, limit });
 
   const include = [
-    { model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'] },
+    {
+      model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'],
+      include: [{ model: db.User, as: 'user', attributes: ['username'] }],
+    },
+    { model: db.Album, as: 'album', attributes: ['id', 'title', 'cover_url'] },
   ];
   if (genre) {
     include.push({
@@ -44,7 +48,15 @@ const browseSongs = async ({ page, limit, genre } = {}) => {
       id: s.id,
       title: s.title,
       albumId: s.album_id,
-      artist: s.artistProfile ? { id: s.artistProfile.id, stageName: s.artistProfile.stage_name } : null,
+      album: s.album ? { id: s.album.id, title: s.album.title } : null,
+      coverUrl: s.album ? (s.album.cover_url ?? null) : null,
+      artist: s.artistProfile
+        ? {
+            id: s.artistProfile.id,
+            stageName: s.artistProfile.stage_name,
+            username: s.artistProfile.user ? s.artistProfile.user.username : null,
+          }
+        : null,
       durationSeconds: s.duration_seconds ?? null,
       genres: (s.genres || []).map((g) => ({ id: g.id, name: g.name })),
     })),
@@ -56,7 +68,10 @@ const browseAlbums = async ({ page, limit } = {}) => {
   const { safeLimit, safePage, offset } = paginate({ page, limit });
   const { count, rows } = await db.Album.findAndCountAll({
     where: { status: 'published' },
-    include: [{ model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'] }],
+    include: [{
+      model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'],
+      include: [{ model: db.User, as: 'user', attributes: ['username'] }],
+    }],
     order: [['release_date', 'DESC'], ['id', 'DESC']],
     limit: safeLimit,
     offset,
@@ -66,7 +81,13 @@ const browseAlbums = async ({ page, limit } = {}) => {
     albums: rows.map((a) => ({
       id: a.id, title: a.title, coverUrl: a.cover_url ?? null,
       isSingle: a.is_single, releaseDate: a.release_date ?? null,
-      artist: a.artistProfile ? { id: a.artistProfile.id, stageName: a.artistProfile.stage_name } : null,
+      artist: a.artistProfile
+        ? {
+            id: a.artistProfile.id,
+            stageName: a.artistProfile.stage_name,
+            username: a.artistProfile.user ? a.artistProfile.user.username : null,
+          }
+        : null,
     })),
     pagination: pageMeta(count, safePage, safeLimit),
   };
@@ -108,13 +129,19 @@ const search = async ({ q, page, limit } = {}) => {
 
   const songs = await db.Song.findAll({
     where: { status: 'published', title: like },
-    include: [{ model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'] }],
+    include: [{
+      model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'],
+      include: [{ model: db.User, as: 'user', attributes: ['username'] }],
+    }],
     limit: safeLimit,
     order: [['id', 'DESC']],
   });
   const albums = await db.Album.findAll({
     where: { status: 'published', title: like },
-    include: [{ model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'] }],
+    include: [{
+      model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'],
+      include: [{ model: db.User, as: 'user', attributes: ['username'] }],
+    }],
     limit: safeLimit,
     order: [['id', 'DESC']],
   });

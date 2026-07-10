@@ -1,5 +1,6 @@
 'use strict';
 const adminCatalogService = require('../services/adminCatalogService');
+const artistProfileService = require('../services/artistProfileService');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
 const ApiError = require('../utils/ApiError');
@@ -32,4 +33,27 @@ const adminSetAlbumStatus = catchAsync(async (req, res) => {
   return success(res, 200, 'Album status updated', result);
 });
 
-module.exports = { listAllSongs, listAllAlbums, adminSetSongStatus, adminSetAlbumStatus };
+// GET /admin/catalog/artists?verified=true|false  — list artist profiles for the manage-artists page. Omit `verified` for all; pass false to see the approval queue (unverified artists awaiting verification).
+const listAllArtists = catchAsync(async (req, res) => {
+  const { page, limit, verified } = req.query;
+  const result = await adminCatalogService.listAllArtists({ page, limit, verified });
+  return success(res, 200, 'Artists retrieved', result);
+});
+
+// PATCH /admin/catalog/artists/:id/verify  { isVerified?: boolean } Flips an artist's verified flag. Defaults to verifying (true) when the body omits isVerified — the common case is "approve this artist." Pass { isVerified: false } to revoke. Replaces the manual SQL is_verified flip.
+const adminVerifyArtist = catchAsync(async (req, res) => {
+  const artistProfileId = req.params.id;
+  const { isVerified } = req.body || {};
+  const value = isVerified === undefined ? true : Boolean(isVerified);
+  const result = await artistProfileService.setVerified({ artistProfileId, isVerified: value });
+  return success(res, 200, value ? 'Artist verified' : 'Artist unverified', result);
+});
+
+module.exports = {
+  listAllSongs,
+  listAllAlbums,
+  listAllArtists,
+  adminSetSongStatus,
+  adminSetAlbumStatus,
+  adminVerifyArtist,
+};

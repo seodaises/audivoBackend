@@ -66,6 +66,59 @@ const getOwnProfile = async ({ actor }) => {
   return profileRow(profile);
 };
 
+// The logged-in artist's OWN catalog, ALL statuses (Library page: draft +
+// published + archived). Returns an empty catalog (not an error) if the user
+// isn't an artist yet, so a brand-new user's Library isn't a 404. Songs carry
+// their album's cover so the same MediaCard can render them.
+const getMyCatalog = async ({ actor }) => {
+  const profile = await findProfileByUserId(actor.id);
+  if (!profile) {
+    return { isArtist: false, profile: null, albums: [], songs: [] };
+  }
+
+  const albums = await db.Album.findAll({
+    where: { artist_profile_id: profile.id },
+    order: [['id', 'DESC']],
+  });
+
+  const songs = await db.Song.findAll({
+    where: { artist_profile_id: profile.id },
+    include: [
+      { model: db.Album, as: 'album', attributes: ['id', 'title', 'cover_url'] },
+      { model: db.Genre, as: 'genres', attributes: ['id', 'name'], through: { attributes: [] } },
+    ],
+    order: [['id', 'DESC']],
+  });
+
+  return {
+    isArtist: true,
+    profile: profileRow(profile),
+    albums: albums.map((a) => ({
+      id: a.id, title: a.title, coverUrl: a.cover_url ?? null,
+      status: a.status, isSingle: a.is_single, releaseDate: a.release_date ?? null,
+    })),
+    songs: songs.map((s) => ({
+      id: s.id, title: s.title, albumId: s.album_id, status: s.status,
+      trackNumber: s.track_number ?? null, durationSeconds: s.duration_seconds ?? null,
+      album: s.album ? { id: s.album.id, title: s.album.title } : null,
+      coverUrl: s.album ? (s.album.cover_url ?? null) : null,
+      artist: { id: profile.id, stageName: profile.stage_name },
+      genres: (s.genres || []).map((g) => ({ id: g.id, name: g.name })),
+    })),
+  };
+};
+
+// Admin action: verify (or un-verify) an artist by artist_profile id. Gated by
+// manage_catalog at the route. Verification is the publish gate — an unverified
+// artist can't create albums/songs. Replaces the manual SQL is_verified flip.
+const setVerified = async ({ artistProfileId, isVerified }) => {
+  const profile = await db.ArtistProfile.findByPk(artistProfileId);
+  if (!profile) throw new ApiError(404, 'Artist profile not found');
+  profile.is_verified = Boolean(isVerified);
+  await profile.save();
+  return profileRow(profile);
+};
+
 // Public artist page: profile + PUBLISHED albums/songs only. Looked up by the
 // user's username (stable public handle), then joined to the profile.
 const getPublicProfile = async ({ username }) => {
@@ -107,6 +160,8 @@ module.exports = {
   createProfile,
   updateProfile,
   getOwnProfile,
+  getMyCatalog,
+  setVerified,
   getPublicProfile,
   findProfileByUserId,
   requireOwnProfile,

@@ -58,6 +58,41 @@ const listAllAlbums = async ({ page, limit, status } = {}) => {
   };
 };
 
+// Admin oversight: ALL artist profiles. Optional `verified` filter lets the
+// manage-artists page show pending (unverified) artists specifically — the
+// common case is "who's waiting for approval." Joins the user for the public
+// username handle and the account email (admins need to know who they're
+// verifying). `verified` arrives as a query string, so we normalize it.
+const listAllArtists = async ({ page, limit, verified } = {}) => {
+  const { safeLimit, safePage, offset } = paginate({ page, limit });
+
+  const where = {};
+  if (verified === 'true' || verified === true) where.is_verified = true;
+  else if (verified === 'false' || verified === false) where.is_verified = false;
+
+  const { count, rows } = await db.ArtistProfile.findAndCountAll({
+    where,
+    include: [{ model: db.User, as: 'user', attributes: ['id', 'username', 'email'] }],
+    order: [['id', 'DESC']],
+    limit: safeLimit,
+    offset,
+    distinct: true,
+  });
+  return {
+    artists: rows.map((p) => ({
+      id: p.id,
+      stageName: p.stage_name,
+      bio: p.bio ?? null,
+      avatarUrl: p.avatar_url ?? null,
+      isVerified: p.is_verified,
+      user: p.user
+        ? { id: p.user.id, username: p.user.username, email: p.user.email }
+        : null,
+    })),
+    pagination: pageMeta(count, safePage, safeLimit),
+  };
+};
+
 // Admin force-set status on ANY song — ownership bypassed; manage_catalog is the
 // gate (checked at the route). The "administrators oversee the catalog" power.
 const setSongStatus = async ({ actor, songId, status }) => {
@@ -77,9 +112,26 @@ const setAlbumStatus = async ({ actor, albumId, status }) => {
   }
   const album = await db.Album.findByPk(albumId);
   if (!album) throw new ApiError(404, 'Album not found');
-  album.status = status;
-  await album.save();
+  const { Op } = db.Sequelize;
+
+  await db.sequelize.transaction(async (t) => {
+    album.status = status;
+    await album.save({ transaction: t });
+
+    if (status === 'published') {
+      await db.Song.update(
+        { status: 'published' },
+        { where: { album_id: album.id, status: 'draft' }, transaction: t }
+      );
+    } else if (status === 'archived') {
+      await db.Song.update(
+        { status: 'archived' },
+        { where: { album_id: album.id, status: { [Op.ne]: 'archived' } }, transaction: t }
+      );
+    }
+  });
+
   return { id: album.id, status: album.status };
 };
 
-module.exports = { listAllSongs, listAllAlbums, setSongStatus, setAlbumStatus };
+module.exports = { listAllSongs, listAllAlbums, listAllArtists, setSongStatus, setAlbumStatus };

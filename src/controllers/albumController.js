@@ -6,13 +6,14 @@ const ApiError = require('../utils/ApiError');
 
 // POST /api/albums  — create an album owned by the caller's artist profile.
 const createAlbum = catchAsync(async (req, res) => {
-  const { title, coverUrl, releaseDate, isSingle } = req.body || {};
+  const { title, coverUrl, description, releaseDate, isSingle } = req.body || {};
   if (!title) throw new ApiError(400, 'title is required');
 
   const result = await albumService.createAlbum({
     actor: req.user,
     title,
     coverUrl,
+    description,
     releaseDate,
     isSingle,
   });
@@ -22,12 +23,13 @@ const createAlbum = catchAsync(async (req, res) => {
 // PATCH /api/albums/:id  — edit album fields (ownership enforced in service).
 const updateAlbum = catchAsync(async (req, res) => {
   const albumId = req.params.id;
-  const { title, coverUrl, releaseDate } = req.body || {};
+  const { title, coverUrl, description, releaseDate } = req.body || {};
   const result = await albumService.updateAlbum({
     actor: req.user,
     albumId,
     title,
     coverUrl,
+    description,
     releaseDate,
   });
   return success(res, 200, 'Album updated', result);
