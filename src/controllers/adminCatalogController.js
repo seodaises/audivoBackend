@@ -6,14 +6,14 @@ const { success } = require('../utils/response');
 const ApiError = require('../utils/ApiError');
 
 const listAllSongs = catchAsync(async (req, res) => {
-  const { page, limit, status } = req.query;
-  const result = await adminCatalogService.listAllSongs({ page, limit, status });
+  const { page, limit, status, search } = req.query;
+  const result = await adminCatalogService.listAllSongs({ page, limit, status, search });
   return success(res, 200, 'Songs retrieved', result);
 });
 
 const listAllAlbums = catchAsync(async (req, res) => {
-  const { page, limit, status } = req.query;
-  const result = await adminCatalogService.listAllAlbums({ page, limit, status });
+  const { page, limit, status, search } = req.query;
+  const result = await adminCatalogService.listAllAlbums({ page, limit, status, search });
   return success(res, 200, 'Albums retrieved', result);
 });
 
@@ -35,8 +35,8 @@ const adminSetAlbumStatus = catchAsync(async (req, res) => {
 
 // GET /admin/catalog/artists?verified=true|false  — list artist profiles for the manage-artists page. Omit `verified` for all; pass false to see the approval queue (unverified artists awaiting verification).
 const listAllArtists = catchAsync(async (req, res) => {
-  const { page, limit, verified } = req.query;
-  const result = await adminCatalogService.listAllArtists({ page, limit, verified });
+  const { page, limit, verified, search } = req.query;
+  const result = await adminCatalogService.listAllArtists({ page, limit, verified, search });
   return success(res, 200, 'Artists retrieved', result);
 });
 

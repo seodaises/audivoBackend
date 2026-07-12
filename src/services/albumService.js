@@ -61,11 +61,18 @@ const updateAlbum = async ({ actor, albumId, title, coverUrl, description, relea
 };
 
 // Set an album's status, cascading to its songs per these rules:
-//   - Publishing an album promotes its DRAFT songs to published. Songs that are
-//     already published stay published; ARCHIVED songs are left alone (archiving
-//     is a deliberate act — a later album publish shouldn't resurrect them).
+//   - Publishing an album publishes ALL its non-published songs — both drafts
+//     and archived ones. Archive/republish is therefore a symmetric round-trip:
+//     what the archive took down, the republish brings back.
 //   - Archiving an album archives ALL its songs (the whole release goes away).
 //   - Setting an album back to draft does NOT touch song statuses.
+//
+// KNOWN LIMITATION: a song the artist archived DELIBERATELY (a pulled B-side)
+// is indistinguishable from one archived as collateral by an album archive —
+// both are just status='archived'. So republishing resurrects the B-side too.
+// The fix is an `archived_by_album` flag on songs, so the publish cascade can
+// restore only what the album took down. Deferred; see the backlog.
+//
 // Wrapped in a transaction so the album row and its songs move together — if any
 // write fails, none of them commit.
 const setStatus = async ({ actor, albumId, status }) => {
@@ -82,7 +89,12 @@ const setStatus = async ({ actor, albumId, status }) => {
     if (status === 'published') {
       await db.Song.update(
         { status: 'published' },
-        { where: { album_id: album.id, status: 'draft' }, transaction: t }
+        {
+          // Op.ne 'published' — not just 'draft'. Catches archived songs too, so
+          // republishing an archived album actually brings its tracks back.
+          where: { album_id: album.id, status: { [Op.ne]: 'published' } },
+          transaction: t,
+        }
       );
     } else if (status === 'archived') {
       await db.Song.update(

@@ -322,6 +322,8 @@ const rolePermissionSnapshot = async (roleId) => {
   };
 };
 
+const CONTACT_STATUSES = ['new', 'read', 'resolved'];
+
 const contactMessageRow = (m) => ({
   id: m.id,
   name: m.name,
@@ -331,20 +333,52 @@ const contactMessageRow = (m) => ({
   status: m.status,
   userId: m.user_id ?? null,
   createdAt: m.created_at,
+
+  // Audit trail. handler is eager-loaded; null when nobody has resolved it.
+  handledAt: m.handled_at ?? null,
+  handledBy: m.handler
+    ? {
+        id: m.handler.id,
+        username: m.handler.username,
+        displayName: m.handler.display_name,
+      }
+    : null,
 });
 
-const listContactMessages = async ({ page = 1, limit = 50, status } = {}) => {
+// Eager-load the resolving admin on every contact read, so the list and the
+// single-row response share one shape.
+const CONTACT_INCLUDE = [
+  {
+    model: db.User,
+    as: 'handler',
+    attributes: ['id', 'username', 'display_name'],
+    required: false, // LEFT JOIN — unresolved messages must still come back
+  },
+];
+
+const listContactMessages = async ({ page = 1, limit = 50, status, search } = {}) => {
   const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 100);
   const safePage = Math.max(parseInt(page, 10) || 1, 1);
   const offset = (safePage - 1) * safeLimit;
 
   const where = {};
-  if (status && ['new', 'read', 'resolved'].includes(status)) {
+  if (status && CONTACT_STATUSES.includes(status)) {
     where.status = status;
+      // Search across sender name, email, and subject.
+  const clean = String(search || '').trim();
+  if (clean) {
+    const term = `%${clean.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+    where[Op.or] = [
+      { name:    { [Op.like]: term } },
+      { email:   { [Op.like]: term } },
+      { subject: { [Op.like]: term } },
+    ];
+  }
   }
 
   const { count, rows } = await db.ContactMessage.findAndCountAll({
     where,
+    include: CONTACT_INCLUDE,
     order: [['created_at', 'DESC']],
     limit: safeLimit,
     offset,
@@ -359,6 +393,35 @@ const listContactMessages = async ({ page = 1, limit = 50, status } = {}) => {
       totalPages: Math.ceil(count / safeLimit),
     },
   };
+};
+
+// PATCH /api/admin/contact-messages/:id/status
+// Moves a query through new -> read -> resolved (and back).
+//
+// Audit rule: handled_by/handled_at are stamped ONLY when the message lands on
+// 'resolved', and cleared whenever it leaves. So "handled by" always answers
+// exactly one question — who closed this — and never silently means "who
+// happened to open it first".
+const setContactStatus = async ({ actor, messageId, status }) => {
+  if (!CONTACT_STATUSES.includes(status)) {
+    throw new ApiError(400, `status must be one of: ${CONTACT_STATUSES.join(', ')}`);
+  }
+
+  const message = await db.ContactMessage.findByPk(messageId);
+  if (!message) throw new ApiError(404, 'Contact message not found');
+
+  const isResolving = status === 'resolved';
+
+  await message.update({
+    status,
+    handled_by: isResolving ? actor.id : null,
+    handled_at: isResolving ? new Date() : null,
+  });
+
+  // Re-read with the handler joined so the response matches the list row shape
+  // exactly — the frontend can drop it straight into state.
+  const fresh = await db.ContactMessage.findByPk(message.id, { include: CONTACT_INCLUDE });
+  return contactMessageRow(fresh);
 };
 
 const getMetrics = async ({ actorLevel }) => {
@@ -428,4 +491,5 @@ module.exports = {
   revokePermission,
   getMetrics,
   listContactMessages,
+  setContactStatus,
 };

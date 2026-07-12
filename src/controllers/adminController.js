@@ -121,9 +121,22 @@ const getMetrics = catchAsync(async (req, res) => {
 });
 
 const listContactMessages = catchAsync(async (req, res) => {
-  const { page, limit, status } = req.query;
-  const result = await adminService.listContactMessages({ page, limit, status });
+  const { page, limit, status, search } = req.query;
+  const result = await adminService.listContactMessages({ page, limit, status, search });
   return success(res, 200, 'Contact messages retrieved', result);
+});
+
+// PATCH /api/admin/contact-messages/:id/status   body: { status: "resolved" }
+const setContactStatus = catchAsync(async (req, res) => {
+  const { status } = req.body || {};
+  if (!status) throw new ApiError(400, 'status is required');
+
+  const result = await adminService.setContactStatus({
+    actor: req.user,               // stamped as handler when resolving
+    messageId: req.params.id,
+    status,
+  });
+  return success(res, 200, 'Contact message updated', result);
 });
 
 module.exports = {
@@ -140,4 +153,5 @@ module.exports = {
   revokePermission,
   getMetrics,
   listContactMessages,
+  setContactStatus,
 };
