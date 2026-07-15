@@ -5,6 +5,7 @@ const ApiError = require('../utils/ApiError');
 const { hashPassword, comparePassword } = require('../utils/password');
 const { generateToken } = require('../utils/jwt');
 const { sendVerificationEmail, sendResetPasswordEmail } = require('./emailService');
+const { cascadeUserSoftDelete } = require('./userCascade');
 const {
   generateVerificationToken,
   expiryFromNow,
@@ -346,9 +347,11 @@ const deleteMe = async ({ userId, password }) => {
   // Already gone — idempotent, don't error on a double-submit.
   if (user.deleted_at !== null) return { deleted: true };
 
-  user.deleted_at = new Date();
-  await user.save();
-
+  await db.sequelize.transaction(async (t) => {
+    await cascadeUserSoftDelete(user.id, t);
+    user.deleted_at = new Date();
+    await user.save({ transaction: t });
+  });
   return { deleted: true };
 };
 

@@ -45,6 +45,17 @@ router.get(
   adminController.listContactMessages
 );
 
+// Move a query through new -> read -> resolved. Same gate as the GET above:
+// if you can see the queue, you can work the queue. No new permission key,
+// so nothing to add to the seeders or the frontend permissions map.
+router.patch(
+  '/contact-messages/:id/status',
+  protect,
+  requireMinLevel(ADMIN),
+  requirePermission('manage_users'),
+  adminController.setContactStatus
+);
+
 router.get(
   '/permissions',
   protect,
