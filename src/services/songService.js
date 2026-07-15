@@ -3,7 +3,7 @@ const db = require('../models');
 const ApiError = require('../utils/ApiError');
 const { requireOwnProfile } = require('./artistProfileService');
 const { resolveAudioPath, deleteAudioFile, mimeForKey } = require('../config/storage');
-
+const { comparePassword } = require('../utils/password');
 const VALID_STATUSES = ['draft', 'published', 'archived'];
 
 const songRow = (s) => ({
@@ -15,6 +15,10 @@ const songRow = (s) => ({
   durationSeconds: s.duration_seconds ?? null,
   trackNumber: s.track_number ?? null,
   status: s.status,
+  archivedBy: s.archived_by ?? null, // 'artist' | 'admin' | 'album' | null
+  // Derived, not stored. The frontend must not re-derive this rule — if the
+  // lock condition ever changes, it changes HERE and every client follows.
+  isLocked: s.status === 'archived' && s.archived_by === 'admin',
   playCount: s.play_count,
   createdAt: s.created_at,
 });
@@ -84,7 +88,7 @@ const createSong = async ({ actor, title, albumId, trackNumber, durationSeconds,
           storage_key: storageKey,
           duration_seconds: durationSeconds != null ? Number(durationSeconds) : null,
           track_number: trackNumber != null ? Number(trackNumber) : null,
-          // status defaults to 'draft'
+          // status defaults to 'draft'; archived_by stays NULL
         },
         { transaction: t }
       );
@@ -121,16 +125,74 @@ const updateSong = async ({ actor, songId, title, trackNumber, durationSeconds }
   return songRow(song);
 };
 
+// ARTIST status change. Two rules that didn't exist before:
+//
+// 1. THE LOCK. If a song is archived with archived_by='admin', it was taken down
+//    BY A MODERATOR. The artist cannot move it — not to published, not to draft,
+//    not anywhere. Without this check the entire admin takedown feature is
+//    theatre: the artist just clicks Publish and it's back. Only the admin path
+//    (adminCatalogService.setSongStatus) can lift it.
+//
+// 2. STAMPING. When an artist archives their own song we record archived_by =
+//    'artist'. That's what tells a later album-republish "leave this one alone —
+//    the artist pulled it on purpose, it isn't collateral." Any move OUT of
+//    archived clears the stamp back to NULL, because the field only ever
+//    describes a song that is currently archived.
 const setStatus = async ({ actor, songId, status }) => {
   if (!VALID_STATUSES.includes(status)) {
     throw new ApiError(400, `status must be one of: ${VALID_STATUSES.join(', ')}`);
   }
   const { song } = await loadOwnedSong(actor, songId);
+
+  if (song.status === 'archived' && song.archived_by === 'admin') {
+    throw new ApiError(
+      403,
+      'This track was removed by a moderator and cannot be changed. Contact an admin to appeal.'
+    );
+  }
+
   song.status = status;
+  song.archived_by = status === 'archived' ? 'artist' : null;
   await song.save();
   return songRow(song);
 };
 
+// Hard delete an owned song: the DB row, its genre links, and the audio file.
+//
+// WHY HARD, not soft: `archived` is ALREADY the reversible "take it down but
+// keep it" state. Adding deleted_at on top would give us two overlapping ways to
+// hide a song, and every catalog read would have to reason about both. Delete
+// here means delete — and because it means delete, it also cleans up the disk,
+// which is the orphaned-audio problem solved as a side effect.
+//
+// Order matters: DB first inside a transaction, file LAST. If the DB rolls back,
+// the file is still there and nothing is lost. If we unlinked first and the DB
+// then failed, we'd have a row pointing at a file that no longer exists — a song
+// that appears in the catalog and 500s on play. Losing a file is worse than
+// leaving one behind, so the irreversible step goes last.
+const deleteSong = async ({ actor, songId, password }) => {
+  const { song } = await loadOwnedSong(actor, songId);
+
+  // The actor object comes from `protect` and may be a lean projection, so
+  // re-read the user to be certain we have password_hash to compare against.
+  const user = await db.User.findByPk(actor.id, { attributes: ['id', 'password_hash'] });
+  if (!user) throw new ApiError(404, 'User not found');
+
+  if (!password) throw new ApiError(400, 'Password is required to delete');
+  const ok = await comparePassword(password, user.password_hash);
+  // 401, not 403. The session is valid; it's the re-authentication that failed.
+  if (!ok) throw new ApiError(401, 'Password is incorrect');
+
+  const storageKey = song.storage_key;
+
+  await db.sequelize.transaction(async (t) => {
+    await db.SongGenre.destroy({ where: { song_id: song.id }, transaction: t });
+    await song.destroy({ transaction: t });
+  });
+
+  deleteAudioFile(storageKey); // best-effort; already swallows ENOENT
+  return { id: Number(songId), deleted: true };
+};
 // Replace the song's genre set (M2M). Transactional: clear then set, atomic.
 const setGenres = async ({ actor, songId, genreIds }) => {
   const { song } = await loadOwnedSong(actor, songId);
@@ -187,6 +249,7 @@ module.exports = {
   createSong,
   updateSong,
   setStatus,
+  deleteSong,
   setGenres,
   resolvePlayableFile,
   songRow,

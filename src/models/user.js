@@ -12,19 +12,15 @@ module.exports = (sequelize, DataTypes) => {
       });
       User.hasMany(models.PasswordResetToken, { foreignKey: 'user_id', as: 'resetTokens' });
       User.hasMany(models.LoginHistory, { foreignKey: 'user_id', as: 'loginHistory' });
-    }
 
-    get isVerified() {
-      return this.email_verified_at !== null;
-    }
-
-    get isDeleted() {
-      return this.deleted_at !== null;
-    }
-
-    get fullName() {
-      const parts = [this.first_name, this.last_name].filter(Boolean);
-      return parts.length ? parts.join(' ') : null;
+      // ── Social ────────────────────────────────────────────────────────────
+      User.hasMany(models.Like, { foreignKey: 'user_id', as: 'likes' });
+      User.hasMany(models.Follow, { foreignKey: 'follower_user_id', as: 'following' });
+      User.hasMany(models.SavedSong, { foreignKey: 'user_id', as: 'savedSongs' });
+      User.hasMany(models.SavedAlbum, { foreignKey: 'user_id', as: 'savedAlbums' });
+      User.hasMany(models.PlayHistory, { foreignKey: 'user_id', as: 'plays' });
+      User.hasMany(models.Playlist, { foreignKey: 'user_id', as: 'playlists' });
+      User.hasMany(models.Comment, { foreignKey: 'user_id', as: 'comments' });
     }
   }
 

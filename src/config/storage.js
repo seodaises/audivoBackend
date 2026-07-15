@@ -5,7 +5,6 @@ const crypto = require('crypto');
 const multer = require('multer');
 const ApiError = require('../utils/ApiError');
 
-// Kept at PROJECT ROOT (not src/) because uploaded files are DATA, not code. This is the single dir that swaps out for S3/GCS later — nothing in src/ changes on migration. Gitignored.
 const STORAGE_ROOT = path.join(__dirname, '..', '..', 'storage');
 const AUDIO_DIR = path.join(STORAGE_ROOT, 'audio');
 fs.mkdirSync(AUDIO_DIR, { recursive: true });
@@ -20,8 +19,6 @@ const EXT_BY_MIME = {
   'audio/flac': '.flac', 'audio/x-flac': '.flac',
 };
 
-// storage_key = UUID + extension: collision-proof, injection-proof (no original
-// filename touches disk), and the ext lets the serve endpoint set Content-Type.
 const storage = multer.diskStorage({
   destination(req, file, cb) { cb(null, AUDIO_DIR); },
   filename(req, file, cb) {
@@ -38,7 +35,6 @@ const fileFilter = (req, file, cb) => {
 const MAX_AUDIO_BYTES = 50 * 1024 * 1024; // 50 MB beta ceiling
 const audioUpload = multer({ storage, fileFilter, limits: { fileSize: MAX_AUDIO_BYTES } });
 
-// Map a stored key back to its absolute path. Guards path traversal.
 const resolveAudioPath = (storageKey) => {
   const key = String(storageKey || '');
   if (!key || key.includes('/') || key.includes('\\') || key.includes('..')) {

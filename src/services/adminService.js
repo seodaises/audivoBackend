@@ -1,10 +1,10 @@
 'use strict';
 const db = require('../models');
-const { Op } = db.Sequelize;
+const { Op, fn, col } = db.Sequelize;
 const ApiError = require('../utils/ApiError');
 const { hashPassword, generateTempPassword } = require('../utils/password');
 const { sendTempPasswordEmail } = require('./emailService');
-
+const { cascadeUserSoftDelete } = require('./userCascade');
 const MAX_ASSIGNABLE_LEVEL = 4; // Admin
 const CREATABLE_ROLES = ['Admin']; 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
@@ -28,6 +28,9 @@ const adminUserRow = (user) => ({
   gender: user.gender ?? null,
   birthday: user.birthday ?? null,
   addressStreet: user.address_street ?? null,
+  emailVerifiedAt: user.email_verified_at ?? null,
+  lastLoginAt: user.last_login_at ?? null,
+  createdAt: user.created_at,
 });
 
 const paginatedUserList = async ({ page, limit, roleWhere, search }) => {
@@ -243,8 +246,11 @@ const softDeleteUser = async ({ actor, targetUserId }) => {
     return { id: target.id, deleted: true };
   }
 
-  target.deleted_at = new Date();
-  await target.save();
+   await db.sequelize.transaction(async (t) => {
+    await cascadeUserSoftDelete(target.id, t);
+    target.deleted_at = new Date();
+    await target.save({ transaction: t });
+  });
 
   return { id: target.id, deleted: true };
 };
@@ -332,7 +338,7 @@ const contactMessageRow = (m) => ({
   message: m.message,
   status: m.status,
   userId: m.user_id ?? null,
-  createdAt: m.created_at,
+  createdAt: m.createdAt ?? null,
 
   // Audit trail. handler is eager-loaded; null when nobody has resolved it.
   handledAt: m.handled_at ?? null,
@@ -362,9 +368,15 @@ const listContactMessages = async ({ page = 1, limit = 50, status, search } = {}
   const offset = (safePage - 1) * safeLimit;
 
   const where = {};
+
+  // Status filter and search are INDEPENDENT. They were not: a stray brace put
+  // the entire search block inside `if (status)`, so searching with the status
+  // filter set to "All" silently did nothing at all. Two sibling ifs, not nested.
   if (status && CONTACT_STATUSES.includes(status)) {
     where.status = status;
-      // Search across sender name, email, and subject.
+  }
+
+  // Search across sender name, email, and subject.
   const clean = String(search || '').trim();
   if (clean) {
     const term = `%${clean.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
@@ -373,7 +385,6 @@ const listContactMessages = async ({ page = 1, limit = 50, status, search } = {}
       { email:   { [Op.like]: term } },
       { subject: { [Op.like]: term } },
     ];
-  }
   }
 
   const { count, rows } = await db.ContactMessage.findAndCountAll({
@@ -468,12 +479,110 @@ const getMetrics = async ({ actorLevel }) => {
     });
   }
 
+  // Catalog + inbox counts.
+  //
+  // These are all independent aggregate reads — none of them needs the result of
+  // another — so they go out concurrently via Promise.all rather than awaiting in
+  // sequence. Ten round trips one-at-a-time would make the dashboard visibly slow
+  // for no reason; the DB is perfectly happy to run them in parallel.
+  //
+  // COUNT(*) with a WHERE is the right tool here, not fetching rows and calling
+  // .length. The DB does the counting; we never pull a single song row across the
+  // wire. That matters once the catalog is bigger than a seed file.
+  const [
+    totalSongs, publishedSongs, draftSongs, archivedSongs,
+    totalAlbums, publishedAlbums, archivedAlbums,
+    totalArtists, verifiedArtists,
+    newQueries, totalPlaysRow,
+  ] = await Promise.all([
+    db.Song.count(),
+    db.Song.count({ where: { status: 'published' } }),
+    db.Song.count({ where: { status: 'draft' } }),
+    db.Song.count({ where: { status: 'archived' } }),
+    db.Album.count(),
+    db.Album.count({ where: { status: 'published' } }),
+    db.Album.count({ where: { status: 'archived' } }),
+    db.ArtistProfile.count({
+      include: [{
+        model: db.User,
+        as: 'user',
+        attributes: [],
+        where: { deleted_at: null },
+        required: true,
+      }],
+    }),
+    db.ArtistProfile.count({
+      where: { is_verified: true },
+      include: [{
+        model: db.User,
+        as: 'user',
+        attributes: [],
+        where: { deleted_at: null },
+        required: true,
+      }],
+    }),
+    // ContactMessage.status is a plain string: 'new' | 'read' | 'resolved'. "Needs attention" is everything NOT resolved — a message someone has merely READ is still outstanding work, so != 'resolved' is the correct predicate, not == 'new'.
+    db.ContactMessage.count({ where: { status: { [Op.ne]: 'resolved' } } }),
+    // SUM(play_count) across all songs. findOne + raw so we get a plain object
+    // back rather than a hydrated model instance we'd have to unwrap.
+    db.Song.findOne({
+      attributes: [[fn('SUM', col('play_count')), 'total']],
+      raw: true,
+    }),
+  ]);
+
+  const [genrePlayRows] = await db.sequelize.query(`
+    SELECT
+      g.id                              AS id,
+      g.name                            AS name,
+      COALESCE(SUM(s.play_count), 0)    AS plays,
+      COUNT(s.id)                       AS song_count
+    FROM genres g
+    LEFT JOIN song_genres sg ON sg.genre_id = g.id
+    LEFT JOIN songs s        ON s.id = sg.song_id AND s.status = 'published'
+    GROUP BY g.id, g.name
+    ORDER BY plays DESC, g.name ASC
+  `);
+
+  const playsByGenre = genrePlayRows.map((r) => ({
+    id: Number(r.id),
+    name: r.name,
+    plays: Number(r.plays || 0),
+    songCount: Number(r.song_count || 0),
+  }));
+
+  // SUM over zero rows returns NULL, not 0 — and MySQL hands large sums back as a
+  // string. Number(x || 0) normalizes both cases so the frontend always gets a
+  // number and never renders "null".
+  const totalPlays = Number(totalPlaysRow?.total || 0);
+
   return {
     totalUsers,
     activeUsers,
     inactiveUsers,
     canSeeSuperAdmin,
     byRole,
+    // Namespaced rather than flattened onto the root. The dashboard renders these
+    // as their own section, and grouping them keeps the response self-describing —
+    // `metrics.catalog.draftSongs` says what it is; `metrics.draftSongs` next to
+    // `metrics.activeUsers` reads like a pile.
+    catalog: {
+      totalSongs,
+      publishedSongs,
+      draftSongs,
+      archivedSongs,
+      totalAlbums,
+      publishedAlbums,
+      archivedAlbums,
+      totalArtists,
+      verifiedArtists,
+      pendingArtists: totalArtists - verifiedArtists,
+      totalPlays,
+      playsByGenre,
+    },
+    inbox: {
+      newQueries,
+    },
   };
 };
 

@@ -14,5 +14,7 @@ router.get('/artists', protect, requireMinLevel(ADMIN), requirePermission('manag
 router.patch('/songs/:id/status', protect, requireMinLevel(ADMIN), requirePermission('manage_catalog'), adminCatalogController.adminSetSongStatus);
 router.patch('/albums/:id/status', protect, requireMinLevel(ADMIN), requirePermission('manage_catalog'), adminCatalogController.adminSetAlbumStatus);
 router.patch('/artists/:id/verify', protect, requireMinLevel(ADMIN), requirePermission('manage_catalog'), adminCatalogController.adminVerifyArtist);
+router.delete('/songs/:id', protect, requireMinLevel(ADMIN), requirePermission('manage_catalog'), adminCatalogController.adminDeleteSong);
+router.delete('/albums/:id', protect, requireMinLevel(ADMIN), requirePermission('manage_catalog'), adminCatalogController.adminDeleteAlbum);
 
 module.exports = router;

@@ -59,9 +59,21 @@ const getAlbum = catchAsync(async (req, res) => {
   return success(res, 200, 'Album retrieved', result);
 });
 
+// DELETE /api/albums/:id  — hard delete, CASCADING to every song in the album
+// (rows, genre links, and audio files). Owner only.
+const deleteAlbum = catchAsync(async (req, res) => {
+  const result = await albumService.deleteAlbum({
+    actor: req.user,
+    albumId: req.params.id,
+    password: req.body?.password,
+  });
+  return success(res, 200, 'Album deleted', result);
+});
+
 module.exports = {
   createAlbum,
   updateAlbum,
   updateStatus,
   getAlbum,
+  deleteAlbum,
 };

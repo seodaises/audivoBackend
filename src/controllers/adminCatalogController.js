@@ -49,6 +49,18 @@ const adminVerifyArtist = catchAsync(async (req, res) => {
   return success(res, 200, value ? 'Artist verified' : 'Artist unverified', result);
 });
 
+// DELETE /admin/catalog/songs/:id — admin hard delete, any owner.
+const adminDeleteSong = catchAsync(async (req, res) => {
+  const result = await adminCatalogService.adminDeleteSong({ songId: req.params.id });
+  return success(res, 200, 'Song deleted', result);
+});
+
+// DELETE /admin/catalog/albums/:id — admin hard delete, cascades to its songs.
+const adminDeleteAlbum = catchAsync(async (req, res) => {
+  const result = await adminCatalogService.adminDeleteAlbum({ albumId: req.params.id });
+  return success(res, 200, 'Album deleted', result);
+});
+
 module.exports = {
   listAllSongs,
   listAllAlbums,
@@ -56,4 +68,6 @@ module.exports = {
   adminSetSongStatus,
   adminSetAlbumStatus,
   adminVerifyArtist,
+  adminDeleteSong,
+  adminDeleteAlbum,
 };

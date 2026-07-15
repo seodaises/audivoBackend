@@ -10,6 +10,7 @@ module.exports = (sequelize, DataTypes) => {
       // a profile owns its catalog
       ArtistProfile.hasMany(models.Album, { foreignKey: 'artist_profile_id', as: 'albums' });
       ArtistProfile.hasMany(models.Song, { foreignKey: 'artist_profile_id', as: 'songs' });
+      ArtistProfile.hasMany(models.Follow, { foreignKey: 'artist_profile_id', as: 'followers' });
     }
   }
 

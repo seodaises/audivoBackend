@@ -21,6 +21,12 @@ module.exports = (sequelize, DataTypes) => {
       });
 
       Song.hasMany(models.SongGenre, { foreignKey: 'song_id', as: 'songGenres' });
+      // ── Social ────────────────────────────────────────────────────────────
+      Song.hasMany(models.Like, { foreignKey: 'song_id', as: 'likes' });
+      Song.hasMany(models.SavedSong, { foreignKey: 'song_id', as: 'saves' });
+      Song.hasMany(models.PlayHistory, { foreignKey: 'song_id', as: 'plays' });
+      Song.hasMany(models.Comment, { foreignKey: 'song_id', as: 'comments' });
+      Song.hasMany(models.PlaylistSong, { foreignKey: 'song_id', as: 'playlistEntries' });
     }
   }
 
@@ -54,6 +60,22 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.ENUM('draft', 'published', 'archived'),
         allowNull: false,
         defaultValue: 'draft',
+      },
+      // WHO archived this song. NULL unless status === 'archived'.
+      //
+      //   'artist' -> the artist pulled it themselves; they can republish freely.
+      //   'admin'  -> a moderation takedown. LOCKED to the artist: the publish
+      //               endpoint refuses, and only an admin can lift it. Without
+      //               this, an artist could undo any takedown with one click,
+      //               which would make moderation decorative.
+      //   'album'  -> collateral damage from an album archive. This is the value
+      //               that lets an album republish restore ONLY what the album
+      //               took down, instead of also resurrecting a B-side the artist
+      //               deliberately pulled.
+      archived_by: {
+        type: DataTypes.ENUM('artist', 'admin', 'album'),
+        allowNull: true,
+        defaultValue: null,
       },
       play_count: {
         type: DataTypes.INTEGER,

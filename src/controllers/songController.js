@@ -3,6 +3,7 @@ const songService = require('../services/songService');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
 const ApiError = require('../utils/ApiError');
+const playService = require('../services/playService');
 
 // POST /api/songs  — multipart upload: audio file (multer) + metadata.
 // multer has already written the file to disk and populated req.file by now.
@@ -81,10 +82,37 @@ const serveSongFile = catchAsync(async (req, res) => {
   return res.sendFile(absolutePath);
 });
 
+// DELETE /api/songs/:id  — hard delete. Owner only (enforced in service).
+// Removes the row, its genre links, and the audio file from disk.
+const deleteSong = catchAsync(async (req, res) => {
+  const result = await songService.deleteSong({
+    actor: req.user,
+    songId: req.params.id,
+    password: req.body?.password,   // DELETE with a body; axios sends it, Express parses it
+  });
+  return success(res, 200, 'Song deleted', result);
+});
+
+// POST /api/songs/:id/play — record a play.
+// Fire-and-forget from the client's point of view: the player doesn't block on
+// this, it just reports that a play happened.
+const recordPlay = catchAsync(async (req, res) => {
+  const { msPlayed, source } = req.body || {};
+  const result = await playService.recordPlay({
+    actor: req.user,
+    songId: req.params.id,
+    msPlayed,
+    source,
+  });
+  return success(res, 201, 'Play recorded', result);
+});
+
 module.exports = {
   uploadSong,
   updateSong,
   updateStatus,
   setGenres,
+  deleteSong,
   serveSongFile,
+  recordPlay,
 };

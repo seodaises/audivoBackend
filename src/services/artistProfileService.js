@@ -90,6 +90,29 @@ const getMyCatalog = async ({ actor }) => {
     order: [['id', 'DESC']],
   });
 
+  // Like counts, in ONE query rather than one-per-song. We ask the likes table to
+  // group by song_id and count, scoped to just this artist's song ids, then build
+  // a lookup. A song with zero likes simply won't appear in the result, so the map
+  // defaults to 0. playCount already rides along on the song row (it's a column);
+  // likeCount does not, because likes live in their own table — hence this join-free
+  // aggregate instead of an include, which would multiply rows and break the counts.
+  const songIds = songs.map((s) => s.id);
+  const likeCounts = new Map();
+  if (songIds.length > 0) {
+    const grouped = await db.Like.findAll({
+      where: { song_id: songIds },
+      attributes: [
+        'song_id',
+        [db.Sequelize.fn('COUNT', db.Sequelize.col('song_id')), 'count'],
+      ],
+      group: ['song_id'],
+      raw: true,
+    });
+    for (const row of grouped) {
+      likeCounts.set(Number(row.song_id), Number(row.count));
+    }
+  }
+
   return {
     isArtist: true,
     profile: profileRow(profile),
@@ -99,6 +122,9 @@ const getMyCatalog = async ({ actor }) => {
     })),
     songs: songs.map((s) => ({
       id: s.id, title: s.title, albumId: s.album_id, status: s.status,
+      archivedBy: s.archived_by ?? null, isLocked: s.status === 'archived' && s.archived_by === 'admin',
+      playCount: s.play_count ?? 0,
+      likeCount: likeCounts.get(s.id) ?? 0,
       trackNumber: s.track_number ?? null, durationSeconds: s.duration_seconds ?? null,
       album: s.album ? { id: s.album.id, title: s.album.title } : null,
       coverUrl: s.album ? (s.album.cover_url ?? null) : null,
