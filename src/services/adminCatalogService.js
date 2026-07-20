@@ -14,11 +14,6 @@ const paginate = ({ page, limit }) => {
 const pageMeta = (count, safePage, safeLimit) => ({
   page: safePage, limit: safeLimit, total: count, totalPages: Math.ceil(count / safeLimit),
 });
-
-// Case-insensitive LIKE. MySQL's default collation is already case-insensitive,
-// so a plain Op.like is the right tool — Op.iLike is Postgres-only and would
-// throw here. Escape the SQL wildcards so a user searching for "100%" doesn't
-// accidentally match everything.
 const likeTerm = (search) => {
   const clean = String(search || '').trim();
   if (!clean) return null;
@@ -38,23 +33,13 @@ const listAllSongs = async ({ page, limit, status, search } = {}) => {
     where,
     include: [
       { model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'] },
-      // The album was previously reduced to a bare `albumId` integer — a number
-      // the admin can't click and can't read. Joining it means the table can show
-      // (and link to) the album a song actually belongs to.
       { model: db.Album, as: 'album', attributes: ['id', 'title'] },
-      // Genres are many-to-many through song_genres. `through: { attributes: [] }`
-      // drops the junction row from the payload — we want the genre, not the fact
-      // that a join table exists.
       { model: db.Genre, as: 'genres', attributes: ['id', 'name'], through: { attributes: [] } },
     ],
     order: [['id', 'DESC']],
     limit: safeLimit,
     offset,
     distinct: true,
-    // A hasMany/belongsToMany join (genres) multiplies rows: a song with 3 genres
-    // becomes 3 result rows. With the default subQuery, LIMIT applies to the
-    // MULTIPLIED rows, so "10 per page" silently returns ~4 songs. subQuery:false
-    // makes LIMIT apply to the parent, and `distinct: true` keeps COUNT honest.
     subQuery: false,
   });
 
@@ -66,10 +51,6 @@ const listAllSongs = async ({ page, limit, status, search } = {}) => {
       status: s.status,
       archivedBy: s.archived_by ?? null,
       isLocked: s.status === 'archived' && s.archived_by === 'admin',
-      // All four of these columns already existed on `songs`. None was ever sent.
-      // This is why the Manage Catalog table looked empty — not a layout problem,
-      // a payload problem: there were no columns to render because there was no
-      // data to render them from.
       durationSeconds: s.duration_seconds ?? null,
       trackNumber: s.track_number ?? null,
       playCount: s.play_count ?? 0,
@@ -135,9 +116,6 @@ const listAllArtists = async ({ page, limit, verified, search } = {}) => {
   if (verified === 'true' || verified === true) where.is_verified = true;
   else if (verified === 'false' || verified === false) where.is_verified = false;
 
-  // Stage name lives on the profile; username/email live on the joined user.
-  // Sequelize lets us reference an included column with `$user.username$` inside
-  // the top-level where, which keeps this as one OR instead of two queries.
   const term = likeTerm(search);
   if (term) {
     where[Op.or] = [
@@ -163,9 +141,6 @@ const listAllArtists = async ({ page, limit, verified, search } = {}) => {
     limit: safeLimit,
     offset,
     distinct: true,
-    // $-column references require the join to be part of the same query, which
-    // subQuery: false guarantees. Without it Sequelize splits the LIMIT into a
-    // subquery that can't see `user`, and MySQL throws "unknown column".
     subQuery: false,
   });
 
@@ -177,9 +152,6 @@ const listAllArtists = async ({ page, limit, verified, search } = {}) => {
       avatarUrl: p.avatar_url ?? null,
       isVerified: p.is_verified,
       createdAt: p.createdAt ?? null,
-      // Subquery results aren't real model attributes, so they don't appear as
-      // p.song_count — they must be pulled with .get(). Number() because MySQL
-      // hands COUNT/SUM back as strings.
       songCount: Number(p.get('song_count') || 0),
       albumCount: Number(p.get('album_count') || 0),
       totalPlays: Number(p.get('total_plays') || 0),
@@ -191,15 +163,15 @@ const listAllArtists = async ({ page, limit, verified, search } = {}) => {
   };
 };
 
-// Admin force-set status on ANY song — ownership bypassed; manage_catalog is the
-// gate (checked at the route). The "administrators oversee the catalog" power.
 const setSongStatus = async ({ actor, songId, status }) => {
   if (!VALID_STATUSES.includes(status)) {
     throw new ApiError(400, `status must be one of: ${VALID_STATUSES.join(', ')}`);
   }
   const song = await db.Song.findByPk(songId);
   if (!song) throw new ApiError(404, 'Song not found');
+
   song.status = status;
+  song.archived_by = status === 'archived' ? 'admin' : null;
   await song.save();
   return { id: song.id, status: song.status };
 };
@@ -210,24 +182,20 @@ const setAlbumStatus = async ({ actor, albumId, status }) => {
   }
   const album = await db.Album.findByPk(albumId);
   if (!album) throw new ApiError(404, 'Album not found');
-  const { Op } = db.Sequelize;
 
   await db.sequelize.transaction(async (t) => {
     album.status = status;
+    album.archived_by = status === 'archived' ? 'admin' : null;
     await album.save({ transaction: t });
 
     if (status === 'published') {
-      // Mirrors albumService.setStatus — publishing an album brings back BOTH
-      // drafts and archived tracks. Keep these two branches in lockstep: the
-      // admin path and the artist path must cascade identically, or the same
-      // album behaves differently depending on who clicked the button.
       await db.Song.update(
-        { status: 'published' },
+        { status: 'published', archived_by: null },
         { where: { album_id: album.id, status: { [Op.ne]: 'published' } }, transaction: t }
       );
     } else if (status === 'archived') {
       await db.Song.update(
-        { status: 'archived' },
+        { status: 'archived', archived_by: 'album' },
         { where: { album_id: album.id, status: { [Op.ne]: 'archived' } }, transaction: t }
       );
     }

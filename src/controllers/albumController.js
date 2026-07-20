@@ -49,6 +49,32 @@ const updateStatus = catchAsync(async (req, res) => {
   return success(res, 200, 'Album status updated', result);
 });
 
+// PATCH /api/albums/:id/schedule  — park album as 'scheduled' with a future
+// release_at. The cron worker publishes it when that time arrives.
+const scheduleRelease = catchAsync(async (req, res) => {
+  const albumId = req.params.id;
+  const { releaseAt } = req.body || {};
+  if (!releaseAt) throw new ApiError(400, 'releaseAt is required');
+
+  const result = await albumService.scheduleRelease({
+    actor: req.user,
+    albumId,
+    releaseAt,
+  });
+  return success(res, 200, 'Album scheduled for release', result);
+});
+
+// DELETE /api/albums/:id/schedule  — cancel a pending schedule, returning the
+// album to a private draft before it fires.
+const cancelSchedule = catchAsync(async (req, res) => {
+  const albumId = req.params.id;
+  const result = await albumService.cancelSchedule({
+    actor: req.user,
+    albumId,
+  });
+  return success(res, 200, 'Scheduled release cancelled', result);
+});
+
 // GET /api/albums/:id  — visibility-gated: owner sees own drafts, others published-only.
 const getAlbum = catchAsync(async (req, res) => {
   const albumId = req.params.id;
@@ -74,6 +100,8 @@ module.exports = {
   createAlbum,
   updateAlbum,
   updateStatus,
+  scheduleRelease,
+  cancelSchedule,
   getAlbum,
   deleteAlbum,
 };

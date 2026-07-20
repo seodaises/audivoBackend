@@ -4,55 +4,50 @@ const cors = require('cors');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const errorHandler = require('./middlewares/errorHandler');
-const authRoutes = require('./routes/authRoutes');
-const adminRoutes = require('./routes/adminRoutes');
-const contactRoutes = require('./routes/contactRoutes');
-const artistRoutes = require('./routes/artistRoutes');
-const albumRoutes = require('./routes/albumRoutes');
-const songRoutes = require('./routes/songRoutes');
-const genreRoutes = require('./routes/genreRoutes');
-const catalogRoutes = require('./routes/catalogRoutes');
-const adminCatalogRoutes = require('./routes/adminCatalogRoutes');
-const socialRoutes = require('./routes/socialRoutes');
-const playlistRoutes = require('./routes/playlistRoutes');
-const commentRoutes = require('./routes/commentRoutes');
+const routes = require('./routes');
+const { startReleaseScheduler } = require('./jobs/releaseScheduler');
 
 const app = express();
+
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   })
 );
+
+const allowedOrigins = [
+  process.env.FRONTEND_ORIGIN,
+  'http://localhost:8080',
+  'http://localhost:4173',
+].filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173',
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
   })
 );
 
 app.use(express.json());
-app.use(cookieParser()); // populates req.cookies from the Cookie header
+app.use(cookieParser());
 
 app.get('/', (req, res) => {
   res.json({ message: 'Audivo backend is running' });
 });
 
-app.use('/api/auth', authRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/contact', contactRoutes);
-app.use('/api/artist', artistRoutes);
-app.use('/api/albums', albumRoutes);
-app.use('/api/songs', songRoutes);
-app.use('/api/genres', genreRoutes);
-app.use('/api/catalog', catalogRoutes);
-app.use('/api/admin/catalog', adminCatalogRoutes);
-app.use('/api/me', socialRoutes);
-app.use('/api/playlists', playlistRoutes);
-app.use('/api/comments', commentRoutes); 
+app.use('/api', routes);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  // Kick off the once-a-minute scheduled-release worker. Lives in-process, so it
+  // runs only while the server runs (see jobs/releaseScheduler.js for the caveat).
+  startReleaseScheduler();
 });
-

@@ -1,10 +1,9 @@
 'use strict';
 const socialService = require('../services/socialService');
+const playService = require('../services/playService');
+const commentService = require('../services/commentService');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
-
-// Every handler here is thin on purpose: pull params off the request, hand them
-// to the service, wrap the result. No business logic, no ORM calls.
 
 // ── Likes ────────────────────────────────────────────────────────────────────
 const likeSong = catchAsync(async (req, res) => {
@@ -104,6 +103,26 @@ const getArtistStatus = catchAsync(async (req, res) => {
   return success(res, 200, 'Artist status', result);
 });
 
+// ── Listening history + my comments ──────────────────────────────────────────
+const listRecentlyPlayed = catchAsync(async (req, res) => {
+  const result = await playService.getRecentlyPlayed({ actor: req.user, limit: req.query.limit });
+  return success(res, 200, 'Recently played', result);
+});
+
+const listMostPlayed = catchAsync(async (req, res) => {
+  const result = await playService.getMostPlayed({ actor: req.user, limit: req.query.limit });
+  return success(res, 200, 'Most played', result);
+});
+
+const listMyComments = catchAsync(async (req, res) => {
+  const result = await commentService.getMyComments({
+    actor: req.user,
+    page: req.query.page,
+    limit: req.query.limit,
+  });
+  return success(res, 200, 'My comments', result);
+});
+
 module.exports = {
   likeSong,
   unlikeSong,
@@ -121,4 +140,7 @@ module.exports = {
   getSongStatus,
   getAlbumStatus,
   getArtistStatus,
+  listRecentlyPlayed,
+  listMostPlayed,
+  listMyComments,
 };

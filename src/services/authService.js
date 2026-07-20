@@ -257,7 +257,11 @@ const getMe = async ({ userId }) => {
 
 const updateMe = async ({ userId, patch }) => {
   const user = await db.User.findByPk(userId, {
-    include: [{ model: db.Role, as: 'role' }],
+    include: [{
+      model: db.Role,
+      as: 'role',
+      include: [{ model: db.Permission, as: 'permissions', attributes: ['key'] }],
+    }],
   });
   if (!user) throw new ApiError(404, 'User not found');
 
@@ -303,7 +307,11 @@ const updateMe = async ({ userId, patch }) => {
   }
 
   await user.save(); // model validators (e.g. avatar_url URL check) run here
-  return publicUser(user);
+
+  const permissions = user.role && user.role.permissions
+    ? user.role.permissions.map((p) => p.key)
+    : [];
+  return publicUser(user, permissions);
 };
 
 // PATCH /auth/me/username — dedicated handle change. No rate limit (for now).

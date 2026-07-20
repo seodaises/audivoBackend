@@ -14,7 +14,11 @@ const albumRow = (a) => ({
   coverUrl: a.cover_url ?? null,
   description: a.description ?? null,
   status: a.status,
+  archivedBy: a.archived_by ?? null, // 'artist' | 'admin' | null
+  // A moderator takedown: the owner cannot republish/change it (mirrors songs).
+  isLocked: a.status === 'archived' && a.archived_by === 'admin',
   releaseDate: a.release_date ?? null,
+  releaseAt: a.release_at ?? null,
   isSingle: a.is_single,
   createdAt: a.created_at,
 });
@@ -62,40 +66,22 @@ const updateAlbum = async ({ actor, albumId, title, coverUrl, description, relea
   return albumRow(album);
 };
 
-// ---------------------------------------------------------------------------
-// The album status cascade — this is the interesting one, so read the rules.
-//
-// ARCHIVING an album takes its songs down with it. But it only touches songs
-// that are NOT already archived, and it stamps the ones it does touch with
-// archived_by='album'. That stamp is the memory: "this song went down BECAUSE
-// the album did." A song the artist had already pulled themselves keeps its
-// existing archived_by='artist' stamp — the album archive doesn't overwrite it,
-// because the album didn't take that one down; it was already gone.
-//
-// PUBLISHING an album only brings back songs it is entitled to bring back:
-//   - drafts                       -> yes. Publishing the album releases them.
-//   - archived_by = 'album'        -> yes. The album took them down; the album
-//                                    puts them back. Symmetric round-trip.
-//   - archived_by = 'artist'       -> NO. The artist deliberately pulled this
-//                                    B-side. Republishing the album must not
-//                                    resurrect it. This was the old bug.
-//   - archived_by = 'admin'        -> NO. Moderator takedown. An artist must not
-//                                    be able to launder a takedown by archiving
-//                                    and republishing the whole album.
-//
-// Setting an album back to draft doesn't touch songs at all.
-//
-// One transaction: the album row and its songs move together, or not at all.
-// ---------------------------------------------------------------------------
 const setStatus = async ({ actor, albumId, status }) => {
   if (!VALID_STATUSES.includes(status)) {
     throw new ApiError(400, `status must be one of: ${VALID_STATUSES.join(', ')}`);
   }
   const { album } = await loadOwnedAlbum(actor, albumId);
   const { Op } = db.Sequelize;
+  if (album.status === 'archived' && album.archived_by === 'admin') {
+    throw new ApiError(
+      403,
+      'This album was removed by a moderator and cannot be changed. Contact an admin to appeal.'
+    );
+  }
 
   await db.sequelize.transaction(async (t) => {
     album.status = status;
+    album.archived_by = status === 'archived' ? 'artist' : null;
     await album.save({ transaction: t });
 
     if (status === 'published') {
@@ -116,9 +102,6 @@ const setStatus = async ({ actor, albumId, status }) => {
       await db.Song.update(
         { status: 'archived', archived_by: 'album' },
         {
-          // Op.ne 'archived' — only songs that are still up. An already-archived
-          // song keeps whatever stamp it has ('artist' or 'admin'), which is the
-          // whole point: we must not overwrite the reason it went down.
           where: { album_id: album.id, status: { [Op.ne]: 'archived' } },
           transaction: t,
         }
@@ -129,15 +112,48 @@ const setStatus = async ({ actor, albumId, status }) => {
   return albumRow(album);
 };
 
-// Hard delete an owned album and EVERYTHING under it: songs, their genre links,
-// and their audio files. This is the cascade.
-//
-// Sequelize's `onDelete: CASCADE` at the DB level would delete the song ROWS for
-// free — but the DB knows nothing about the files on disk. So the cascade is
-// done explicitly in the service: read the songs, delete the DB rows in a
-// transaction, and only once that COMMITS, unlink the files. Same ordering
-// argument as deleteSong: an orphaned file is recoverable, a row pointing at a
-// missing file is a 500 on the play button.
+const scheduleRelease = async ({ actor, albumId, releaseAt }) => {
+  const { album } = await loadOwnedAlbum(actor, albumId);
+
+  if (!releaseAt) throw new ApiError(400, 'releaseAt is required');
+
+  const when = new Date(releaseAt);
+  if (Number.isNaN(when.getTime())) {
+    throw new ApiError(400, 'releaseAt is not a valid date/time');
+  }
+
+  if (when.getTime() <= Date.now() + 1000) {
+    throw new ApiError(400, 'releaseAt must be in the future');
+  }
+
+  if (album.status === 'published') {
+    throw new ApiError(400, 'This album is already published');
+  }
+  if (album.status === 'archived') {
+    throw new ApiError(400, 'Unarchive this album before scheduling it');
+  }
+
+  album.status = 'scheduled';
+  album.release_at = when;
+  await album.save();
+
+  return albumRow(album);
+};
+
+const cancelSchedule = async ({ actor, albumId }) => {
+  const { album } = await loadOwnedAlbum(actor, albumId);
+
+  if (album.status !== 'scheduled') {
+    throw new ApiError(400, 'This album is not scheduled');
+  }
+
+  album.status = 'draft';
+  album.release_at = null;
+  await album.save();
+
+  return albumRow(album);
+};
+
 const deleteAlbum = async ({ actor, albumId, password }) => {
   const { album } = await loadOwnedAlbum(actor, albumId);
 
@@ -168,8 +184,6 @@ const deleteAlbum = async ({ actor, albumId, password }) => {
   return { id: Number(albumId), deleted: true, songsDeleted: songIds.length };
 };
 
-// Visibility-gated read. Non-owners see the album only if published; the owner
-// sees it in any status. actor may be undefined (public read).
 const getAlbumById = async ({ actor, albumId }) => {
   const album = await db.Album.findByPk(albumId, {
     include: [
@@ -216,10 +230,9 @@ const getAlbumById = async ({ actor, albumId }) => {
         durationSeconds: s.duration_seconds ?? null, status: s.status,
         archivedBy: s.archived_by ?? null,
         isLocked: s.status === 'archived' && s.archived_by === 'admin',
+        playCount: s.play_count ?? 0, // public stream count (self-plays excluded)
       })),
   };
 };
 
-module.exports = {
-  createAlbum, updateAlbum, setStatus, deleteAlbum, getAlbumById, albumRow, loadOwnedAlbum,
-};
+module.exports = {createAlbum, updateAlbum, setStatus, scheduleRelease, cancelSchedule, deleteAlbum, getAlbumById, albumRow, loadOwnedAlbum,};

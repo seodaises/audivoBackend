@@ -99,7 +99,11 @@ const browseArtists = async ({ page, limit } = {}) => {
   const { count, rows } = await db.ArtistProfile.findAndCountAll({
     include: [
       { model: db.Song, as: 'songs', attributes: [], where: { status: 'published' }, required: true },
-      { model: db.User, as: 'user', attributes: ['username'] },
+      {
+        model: db.User, as: 'user', attributes: ['username'],
+        where: { deleted_at: null },
+        required: true,
+      },
     ],
     order: [['id', 'ASC']],
     limit: safeLimit,
@@ -129,10 +133,13 @@ const search = async ({ q, page, limit } = {}) => {
 
   const songs = await db.Song.findAll({
     where: { status: 'published', title: like },
-    include: [{
-      model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'],
-      include: [{ model: db.User, as: 'user', attributes: ['username'] }],
-    }],
+    include: [
+      {
+        model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'],
+        include: [{ model: db.User, as: 'user', attributes: ['username'] }],
+      },
+      { model: db.Album, as: 'album', attributes: ['id', 'title', 'cover_url'] },
+    ],
     limit: safeLimit,
     order: [['id', 'DESC']],
   });
@@ -147,21 +154,39 @@ const search = async ({ q, page, limit } = {}) => {
   });
   const artists = await db.ArtistProfile.findAll({
     where: { stage_name: like },
+    include: [
+      {
+        model: db.User, as: 'user', attributes: ['username'],
+        where: { deleted_at: null }, required: true,
+      },
+      { model: db.Song, as: 'songs', attributes: [], where: { status: 'published' }, required: true },
+    ],
     limit: safeLimit,
     order: [['id', 'ASC']],
+    subQuery: true,
   });
 
   return {
     query: term,
     songs: songs.map((s) => ({
       id: s.id, title: s.title,
+      albumId: s.album_id,
+      album: s.album ? { id: s.album.id, title: s.album.title } : null,
+      coverUrl: s.album ? (s.album.cover_url ?? null) : null,
       artist: s.artistProfile ? { id: s.artistProfile.id, stageName: s.artistProfile.stage_name } : null,
     })),
     albums: albums.map((a) => ({
       id: a.id, title: a.title,
+      coverUrl: a.cover_url ?? null,
       artist: a.artistProfile ? { id: a.artistProfile.id, stageName: a.artistProfile.stage_name } : null,
     })),
-    artists: artists.map((p) => ({ id: p.id, stageName: p.stage_name })),
+    artists: artists.map((p) => ({
+      id: p.id,
+      stageName: p.stage_name,
+      // Now that the user is joined, expose the handle — artist profile routes
+      // are keyed by username, so without it a search result can't link out.
+      username: p.user ? p.user.username : null,
+    })),
   };
 };
 
