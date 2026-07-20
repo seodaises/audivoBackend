@@ -38,4 +38,15 @@ router.get('/status/song/:id', socialController.getSongStatus);
 router.get('/status/album/:id', socialController.getAlbumStatus);
 router.get('/status/artist/:id', socialController.getArtistStatus);
 
+// ── Listening history (Library reads) ────────────────────────────────────────
+// Personal, per-user reads from play_history. "Recently played" is distinct
+// songs by latest listen; "most played" is the caller's OWN top songs by their
+// personal play count (not the global play_count).
+router.get('/history/recent', socialController.listRecentlyPlayed);
+router.get('/history/most-played', socialController.listMostPlayed);
+
+// ── My comments (Library read) ───────────────────────────────────────────────
+// Every comment the caller has authored, across all songs, newest first.
+router.get('/comments', socialController.listMyComments);
+
 module.exports = router;

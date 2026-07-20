@@ -40,13 +40,22 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
       },
       status: {
-        type: DataTypes.ENUM('draft', 'published', 'archived'),
+        type: DataTypes.ENUM('draft', 'published', 'archived', 'scheduled'),
         allowNull: false,
         defaultValue: 'draft', // listeners see 'published' only
       },
+      archived_by: {
+        type: DataTypes.ENUM('artist', 'admin'),
+        allowNull: true,
+        defaultValue: null,
+      },
       release_date: {
         type: DataTypes.DATEONLY,
-        allowNull: true,
+        allowNull: true, // human-facing display date only
+      },
+      release_at: {
+        type: DataTypes.DATE,
+        allowNull: true, // UTC trigger instant for a scheduled release; NULL otherwise
       },
       is_single: {
         type: DataTypes.BOOLEAN,

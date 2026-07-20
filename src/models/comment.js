@@ -25,6 +25,16 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'parent_comment_id',
         as: 'replies',
       });
+
+      // A SECOND, independent self-reference. parent_comment_id always points
+      // at the ROOT of the thread (flat storage); replyTo points at whichever
+      // comment was actually replied to, which may be that same root OR
+      // another reply. This is what lets "reply to a reply" exist without
+      // the storage model growing an actual tree.
+      Comment.belongsTo(models.Comment, {
+        foreignKey: 'reply_to_comment_id',
+        as: 'replyTo',
+      });
     }
 
     get isDeleted() {
@@ -42,6 +52,7 @@ module.exports = (sequelize, DataTypes) => {
       song_id: { type: DataTypes.INTEGER, allowNull: false },
       body: { type: DataTypes.TEXT, allowNull: false },
       parent_comment_id: { type: DataTypes.INTEGER, allowNull: true },
+      reply_to_comment_id: { type: DataTypes.INTEGER, allowNull: true },
       status: {
         type: DataTypes.ENUM('visible', 'hidden'),
         allowNull: false,

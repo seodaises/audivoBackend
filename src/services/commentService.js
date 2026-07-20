@@ -33,47 +33,11 @@ const cleanBody = (body) => {
   return b;
 };
 
-// THE eager-load that every public comment read must use.
-//
-// deleted_at is in the attributes list ON PURPOSE, and this is the single
-// easiest thing to get wrong in the whole module. publicProfile() decides
-// whether to render a tombstone by reading user.deleted_at — so if you omit it
-// here, the field arrives undefined, the check silently passes, and a deleted
-// user's real name renders on a public page. It fails open, and it fails
-// quietly. There is no error to notice.
 const authorInclude = {
   model: db.User,
   as: 'author',
   attributes: ['id', 'username', 'display_name', 'avatar_url', 'deleted_at'],
 };
-
-// ── Moderation model ─────────────────────────────────────────────────────────
-//
-// Two INDEPENDENT axes, and conflating them is the classic mistake:
-//
-//   deleted_at  — the AUTHOR withdrew it.    "I take it back."
-//   status      — a MODERATOR hid it.        "You don't get to say that."
-//
-// They must stay separate because the answers to "can the author restore it?"
-// differ: yes for their own delete, absolutely not for a moderator's hide. If
-// you collapse both into one column, an author can un-hide their own moderated
-// comment simply by editing it, and moderation means nothing.
-//
-// A hidden comment is NOT deleted. The row stays, the moderator who hid it is
-// recorded in hidden_by_user_id, and it remains visible to moderators. That
-// audit trail is the entire point — "who hid this, and when" must be answerable.
-
-// Is this actor a moderator?
-//
-// requirePermission() attaches req.user.permissions — but ONLY on routes it
-// guards. The public read route is deliberately ungated (anyone logged in may
-// read comments), so on that path `permissions` is undefined and we must resolve
-// the role ourselves.
-//
-// Without this fallback a moderator reading a song page would see the same
-// '[removed by moderator]' tombstones as everyone else — unable to review, or
-// reverse, their own decisions. It would fail quietly, and look like the
-// moderation feature simply didn't work.
 const isModerator = async (actor) => {
   if (!actor) return false;
   if (Array.isArray(actor.permissions)) {
@@ -89,12 +53,25 @@ const isModerator = async (actor) => {
   return (role.permissions || []).some((p) => p.key === 'moderate_comments');
 };
 
-// What a comment looks like to a regular user.
-//
-// A hidden comment is TOMBSTONED, not omitted. If we dropped it from the list,
-// every reply beneath it would become an orphan — a conversation full of answers
-// to a question nobody can see. The body is replaced; the row's position in the
-// thread survives.
+const hasPermission = (actor, key) =>
+  Array.isArray(actor?.permissions) && actor.permissions.includes(key);
+
+const isGlobalCommentDeleter = async (actor) => {
+  if (hasPermission(actor, 'manage_users')) return true;
+  if (!actor?.roleId) return false;
+  const role = await db.Role.findByPk(actor.roleId, {
+    include: [{ model: db.Permission, as: 'permissions', attributes: ['key'] }],
+  });
+  return (role?.permissions || []).some((p) => p.key === 'manage_users');
+};
+
+const ownsCommentSong = async (actor, comment) => {
+  const profile = await db.ArtistProfile.findOne({ where: { user_id: actor.id } });
+  if (!profile) return false;
+  const song = await db.Song.findByPk(comment.song_id, { attributes: ['artist_profile_id'] });
+  return Boolean(song) && song.artist_profile_id === profile.id;
+};
+
 const commentRow = (c, { asModerator = false } = {}) => {
   const hidden = c.status === 'hidden';
   const deleted = c.deleted_at !== null && c.deleted_at !== undefined;
@@ -103,10 +80,8 @@ const commentRow = (c, { asModerator = false } = {}) => {
     id: c.id,
     songId: c.song_id,
     parentCommentId: c.parent_comment_id ?? null,
+    replyToCommentId: c.reply_to_comment_id ?? null,
     createdAt: c.created_at,
-    // publicProfile is the whole reason this file can exist safely. Handing the
-    // raw User row to the frontend would ship the author's email, phone, and
-    // home address to every stranger who opens the song page.
     author: publicProfile(c.author),
     isHidden: hidden,
     isDeleted: deleted,
@@ -119,8 +94,6 @@ const commentRow = (c, { asModerator = false } = {}) => {
   if (hidden) {
     return {
       ...base,
-      // Moderators see through the tombstone — they must, or they could never
-      // review or reverse their own decisions.
       body: asModerator ? c.body : '[removed by moderator]',
       ...(asModerator
         ? { hiddenBy: c.hiddenBy ? publicProfile(c.hiddenBy) : null }
@@ -131,13 +104,6 @@ const commentRow = (c, { asModerator = false } = {}) => {
   return { ...base, body: c.body };
 };
 
-// ── Reads ────────────────────────────────────────────────────────────────────
-
-// Two-level threading: top-level comments, each with its replies.
-//
-// Deliberately NOT arbitrary-depth. Infinite nesting is a recursive query and a
-// UI nobody can render past level 3. The schema allows parent_comment_id to
-// point anywhere, so the DEPTH RULE IS ENFORCED HERE — see createComment.
 const listForSong = async ({ actor, songId, page, limit }) => {
   const sid = toId(songId, 'song');
 
@@ -150,9 +116,6 @@ const listForSong = async ({ actor, songId, page, limit }) => {
   const mod = await isModerator(actor);
   const { safeLimit, safePage, offset } = paginate({ page, limit });
 
-  // Page over TOP-LEVEL comments only. Paginating over a flat list would split
-  // a thread across two pages — replies stranded on page 2, their parent on
-  // page 1.
   const { count, rows } = await db.Comment.findAndCountAll({
     where: { song_id: sid, parent_comment_id: null, deleted_at: null },
     include: [authorInclude, ...(mod ? [{ model: db.User, as: 'hiddenBy', attributes: ['id', 'username', 'display_name', 'avatar_url', 'deleted_at'] }] : [])],
@@ -162,8 +125,6 @@ const listForSong = async ({ actor, songId, page, limit }) => {
     distinct: true,
   });
 
-  // Fetch ALL replies for this page's parents in ONE query. The naive version is
-  // an N+1: 20 comments = 21 round trips.
   const parentIds = rows.map((c) => c.id);
   const replies = parentIds.length
     ? await db.Comment.findAll({
@@ -177,23 +138,35 @@ const listForSong = async ({ actor, songId, page, limit }) => {
     : [];
 
   const byParent = replies.reduce((acc, r) => {
-    (acc[r.parent_comment_id] = acc[r.parent_comment_id] || []).push(
-      commentRow(r, { asModerator: mod })
-    );
+    (acc[r.parent_comment_id] = acc[r.parent_comment_id] || []).push(r);
     return acc;
   }, {});
+
+  const authorById = {};
+  for (const r of rows) authorById[r.id] = publicProfile(r.author);
+  for (const r of replies) authorById[r.id] = publicProfile(r.author);
+
+  const replyRow = (r) => {
+    const row = commentRow(r, { asModerator: mod });
+    if (r.reply_to_comment_id != null && r.reply_to_comment_id !== r.parent_comment_id) {
+      row.replyingTo = {
+        commentId: r.reply_to_comment_id,
+        author: authorById[r.reply_to_comment_id] ?? null,
+      };
+    }
+    return row;
+  };
 
   return {
     items: rows.map((c) => ({
       ...commentRow(c, { asModerator: mod }),
-      replies: byParent[c.id] || [],
+      replies: (byParent[c.id] || []).map(replyRow),
       replyCount: (byParent[c.id] || []).length,
     })),
     pagination: pageMeta(count, safePage, safeLimit),
   };
 };
 
-// ── Writes ───────────────────────────────────────────────────────────────────
 
 const createComment = async ({ actor, songId, body, parentCommentId }) => {
   const sid = toId(songId, 'song');
@@ -206,33 +179,33 @@ const createComment = async ({ actor, songId, body, parentCommentId }) => {
   }
 
   let parentId = null;
+  let replyToId = null;
 
   if (parentCommentId !== undefined && parentCommentId !== null && parentCommentId !== '') {
-    parentId = toId(parentCommentId, 'parent comment');
+    const targetId = toId(parentCommentId, 'parent comment');
 
-    const parent = await db.Comment.findOne({
-      where: { id: parentId, deleted_at: null },
+    const target = await db.Comment.findOne({
+      where: { id: targetId, deleted_at: null },
     });
-    if (!parent) throw new ApiError(404, 'Parent comment not found');
+    if (!target) throw new ApiError(404, 'Parent comment not found');
 
-    // The parent must be on the SAME song. Without this you could graft a reply
-    // from one song's thread onto another's by passing a foreign parent id.
-    if (parent.song_id !== sid) {
+
+    if (target.song_id !== sid) {
       throw new ApiError(400, 'Parent comment belongs to a different song');
     }
 
-    // DEPTH CAP — the schema cannot enforce this, so the service must.
-    // parent_comment_id is just an INTEGER FK; nothing at the DB level stops a
-    // reply-to-a-reply-to-a-reply. Two levels is the rule, and this is the only
-    // place it exists.
-    if (parent.parent_comment_id !== null) {
-      throw new ApiError(400, 'Replies are only allowed one level deep');
+    if (target.status === 'hidden') {
+      throw new ApiError(403, 'You cannot reply to a removed comment');
     }
 
-    // You cannot reply to a comment a moderator has removed. Allowing it would
-    // let a thread grow under content that has been ruled out of bounds.
-    if (parent.status === 'hidden') {
-      throw new ApiError(403, 'You cannot reply to a removed comment');
+    if (target.parent_comment_id === null) {
+      parentId = target.id;
+      replyToId = target.id;
+    } else if (target.reply_to_comment_id === target.parent_comment_id) {
+      parentId = target.parent_comment_id;
+      replyToId = target.id;
+    } else {
+      throw new ApiError(400, 'Replies are only allowed two levels deep');
     }
   }
 
@@ -241,6 +214,7 @@ const createComment = async ({ actor, songId, body, parentCommentId }) => {
     song_id: sid,
     body: text,
     parent_comment_id: parentId,
+    reply_to_comment_id: replyToId,
     status: 'visible',
   });
 
@@ -248,33 +222,34 @@ const createComment = async ({ actor, songId, body, parentCommentId }) => {
   return commentRow(withAuthor);
 };
 
-// The AUTHOR withdrawing their own comment.
 const deleteComment = async ({ actor, commentId }) => {
   const id = toId(commentId, 'comment');
 
   const comment = await db.Comment.findOne({ where: { id, deleted_at: null } });
   if (!comment) throw new ApiError(404, 'Comment not found');
 
-  // Moderators may also delete — but note this is a DIFFERENT act from hiding.
-  // Deleting removes it entirely; hiding preserves it with an audit trail.
-  // A moderator wanting a reversible, attributable action should hide, not delete.
   const mine = comment.user_id === actor.id;
-  if (!mine && !(await isModerator(actor))) {
-    throw new ApiError(403, 'You can only delete your own comments');
+
+  let allowed = mine;
+  if (!allowed && (await isModerator(actor))) allowed = true; // global moderators
+  if (!allowed && hasPermission(actor, 'delete_comments')) {
+    if (await isGlobalCommentDeleter(actor)) {
+      allowed = true; // admin-tier: any comment anywhere
+    } else if (await ownsCommentSong(actor, comment)) {
+      allowed = true; // artist-tier: only comments on their own songs
+    }
   }
 
-  // Soft delete. The row survives because REPLIES DEPEND ON IT — a hard delete
-  // would either cascade away a whole conversation or leave orphaned children
-  // pointing at a row that no longer exists. The tombstone keeps the thread's
-  // shape intact while removing the content.
+  if (!allowed) {
+    throw new ApiError(403, 'You are not allowed to delete this comment');
+  }
+
   comment.deleted_at = new Date();
   await comment.save();
 
   return { id: comment.id, deleted: true };
 };
 
-// ── Moderation ───────────────────────────────────────────────────────────────
-// This is what MODERATE_COMMENTS finally buys.
 
 const setCommentStatus = async ({ actor, commentId, status }) => {
   const id = toId(commentId, 'comment');
@@ -287,10 +262,6 @@ const setCommentStatus = async ({ actor, commentId, status }) => {
   if (!comment) throw new ApiError(404, 'Comment not found');
 
   comment.status = status;
-
-  // The audit trail. hidden_by_user_id answers "WHO decided this?" — the
-  // question that makes moderation accountable rather than arbitrary. It is
-  // cleared on unhide, because an un-hidden comment has no hider.
   comment.hidden_by_user_id = status === 'hidden' ? actor.id : null;
 
   await comment.save();
@@ -338,10 +309,35 @@ const listHidden = async ({ page, limit }) => {
   };
 };
 
+const getMyComments = async ({ actor, page = 1, limit = 30 }) => {
+  const p = Math.max(Number(page) || 1, 1);
+  const lim = Math.min(Math.max(Number(limit) || 30, 1), 100);
+
+  const { rows, count } = await db.Comment.findAndCountAll({
+    where: { user_id: actor.id, deleted_at: null },
+    include: [{ model: db.Song, as: 'song', attributes: ['id', 'title', 'album_id'] }],
+    order: [['created_at', 'DESC']],
+    limit: lim,
+    offset: (p - 1) * lim,
+  });
+
+  const items = rows.map((c) => ({
+    id: c.id,
+    songId: c.song_id,
+    body: c.status === 'hidden' ? '[removed by moderator]' : c.body,
+    isHidden: c.status === 'hidden',
+    createdAt: c.created_at,
+    song: c.song ? { id: c.song.id, title: c.song.title, albumId: c.song.album_id } : null,
+  }));
+
+  return { items, total: count, page: p, limit: lim };
+};
+
 module.exports = {
   listForSong,
   createComment,
   deleteComment,
   setCommentStatus,
   listHidden,
+  getMyComments,
 };

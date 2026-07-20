@@ -5,6 +5,7 @@ const ApiError = require('../utils/ApiError');
 const profileRow = (p) => ({
   id: p.id,
   userId: p.user_id,
+  // attemp at patching bug myself: roleId: p.role_id,
   stageName: p.stage_name,
   bio: p.bio ?? null,
   avatarUrl: p.avatar_url ?? null,
@@ -66,10 +67,6 @@ const getOwnProfile = async ({ actor }) => {
   return profileRow(profile);
 };
 
-// The logged-in artist's OWN catalog, ALL statuses (Library page: draft +
-// published + archived). Returns an empty catalog (not an error) if the user
-// isn't an artist yet, so a brand-new user's Library isn't a 404. Songs carry
-// their album's cover so the same MediaCard can render them.
 const getMyCatalog = async ({ actor }) => {
   const profile = await findProfileByUserId(actor.id);
   if (!profile) {
@@ -90,12 +87,6 @@ const getMyCatalog = async ({ actor }) => {
     order: [['id', 'DESC']],
   });
 
-  // Like counts, in ONE query rather than one-per-song. We ask the likes table to
-  // group by song_id and count, scoped to just this artist's song ids, then build
-  // a lookup. A song with zero likes simply won't appear in the result, so the map
-  // defaults to 0. playCount already rides along on the song row (it's a column);
-  // likeCount does not, because likes live in their own table — hence this join-free
-  // aggregate instead of an include, which would multiply rows and break the counts.
   const songIds = songs.map((s) => s.id);
   const likeCounts = new Map();
   if (songIds.length > 0) {
@@ -119,6 +110,7 @@ const getMyCatalog = async ({ actor }) => {
     albums: albums.map((a) => ({
       id: a.id, title: a.title, coverUrl: a.cover_url ?? null,
       status: a.status, isSingle: a.is_single, releaseDate: a.release_date ?? null,
+      releaseAt: a.release_at ?? null,
     })),
     songs: songs.map((s) => ({
       id: s.id, title: s.title, albumId: s.album_id, status: s.status,

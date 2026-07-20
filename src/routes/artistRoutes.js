@@ -2,8 +2,10 @@
 const express = require('express');
 const router = express.Router();
 const artistProfileController = require('../controllers/artistProfileController');
+const artistAnalyticsController = require('../controllers/artistAnalyticsController');
 const { protect } = require('../middlewares/authMiddleware');
 const { requireRole } = require('../middlewares/requireRole');
+const { requirePermission } = require('../middlewares/requirePermission');
 const noCache = require('../middlewares/noCache');
 
 router.use(noCache);
@@ -26,5 +28,12 @@ router.get('/profile', protect, artistProfileController.getMyProfile);
 // Open to any authenticated user; the service returns an empty catalog (not an
 // error) for non-artists, so a brand-new user's Library isn't a 404.
 router.get('/catalog', protect, artistProfileController.getMyCatalog);
+
+// An artist's own track performance. Gated on the permission only — NOT on
+// requireMinLevel(ADMIN) like /admin/metrics, because this returns strictly the
+// caller's own rows. The service scopes by req.user's artist profile, so the
+// permission answers "may you see analytics at all" and the service answers
+// "whose". Non-artists with the permission get an empty payload, not a 403.
+router.get('/analytics/tracks', protect, requirePermission('view_analytics'), artistAnalyticsController.myTrackPerformance);
 
 module.exports = router;

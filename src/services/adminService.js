@@ -1,6 +1,6 @@
 'use strict';
 const db = require('../models');
-const { Op, fn, col } = db.Sequelize;
+const { Op, fn, col, literal } = db.Sequelize;
 const ApiError = require('../utils/ApiError');
 const { hashPassword, generateTempPassword } = require('../utils/password');
 const { sendTempPasswordEmail } = require('./emailService');
@@ -369,14 +369,10 @@ const listContactMessages = async ({ page = 1, limit = 50, status, search } = {}
 
   const where = {};
 
-  // Status filter and search are INDEPENDENT. They were not: a stray brace put
-  // the entire search block inside `if (status)`, so searching with the status
-  // filter set to "All" silently did nothing at all. Two sibling ifs, not nested.
   if (status && CONTACT_STATUSES.includes(status)) {
     where.status = status;
   }
 
-  // Search across sender name, email, and subject.
   const clean = String(search || '').trim();
   if (clean) {
     const term = `%${clean.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
@@ -406,13 +402,6 @@ const listContactMessages = async ({ page = 1, limit = 50, status, search } = {}
   };
 };
 
-// PATCH /api/admin/contact-messages/:id/status
-// Moves a query through new -> read -> resolved (and back).
-//
-// Audit rule: handled_by/handled_at are stamped ONLY when the message lands on
-// 'resolved', and cleared whenever it leaves. So "handled by" always answers
-// exactly one question — who closed this — and never silently means "who
-// happened to open it first".
 const setContactStatus = async ({ actor, messageId, status }) => {
   if (!CONTACT_STATUSES.includes(status)) {
     throw new ApiError(400, `status must be one of: ${CONTACT_STATUSES.join(', ')}`);
@@ -429,8 +418,6 @@ const setContactStatus = async ({ actor, messageId, status }) => {
     handled_at: isResolving ? new Date() : null,
   });
 
-  // Re-read with the handler joined so the response matches the list row shape
-  // exactly — the frontend can drop it straight into state.
   const fresh = await db.ContactMessage.findByPk(message.id, { include: CONTACT_INCLUDE });
   return contactMessageRow(fresh);
 };
@@ -479,16 +466,6 @@ const getMetrics = async ({ actorLevel }) => {
     });
   }
 
-  // Catalog + inbox counts.
-  //
-  // These are all independent aggregate reads — none of them needs the result of
-  // another — so they go out concurrently via Promise.all rather than awaiting in
-  // sequence. Ten round trips one-at-a-time would make the dashboard visibly slow
-  // for no reason; the DB is perfectly happy to run them in parallel.
-  //
-  // COUNT(*) with a WHERE is the right tool here, not fetching rows and calling
-  // .length. The DB does the counting; we never pull a single song row across the
-  // wire. That matters once the catalog is bigger than a seed file.
   const [
     totalSongs, publishedSongs, draftSongs, archivedSongs,
     totalAlbums, publishedAlbums, archivedAlbums,
@@ -521,39 +498,132 @@ const getMetrics = async ({ actorLevel }) => {
         required: true,
       }],
     }),
-    // ContactMessage.status is a plain string: 'new' | 'read' | 'resolved'. "Needs attention" is everything NOT resolved — a message someone has merely READ is still outstanding work, so != 'resolved' is the correct predicate, not == 'new'.
+
     db.ContactMessage.count({ where: { status: { [Op.ne]: 'resolved' } } }),
-    // SUM(play_count) across all songs. findOne + raw so we get a plain object
-    // back rather than a hydrated model instance we'd have to unwrap.
+
     db.Song.findOne({
       attributes: [[fn('SUM', col('play_count')), 'total']],
       raw: true,
     }),
   ]);
 
-  const [genrePlayRows] = await db.sequelize.query(`
-    SELECT
-      g.id                              AS id,
-      g.name                            AS name,
-      COALESCE(SUM(s.play_count), 0)    AS plays,
-      COUNT(s.id)                       AS song_count
-    FROM genres g
-    LEFT JOIN song_genres sg ON sg.genre_id = g.id
-    LEFT JOIN songs s        ON s.id = sg.song_id AND s.status = 'published'
-    GROUP BY g.id, g.name
-    ORDER BY plays DESC, g.name ASC
-  `);
+  const genreRows = await db.Genre.findAll({
+    attributes: [
+      'id',
+      'name',
+      [fn('COALESCE', fn('SUM', col('songs.play_count')), 0), 'plays'],
+      [fn('COUNT', col('songs.id')), 'song_count'],
+    ],
+    include: [{
+      model: db.Song,
+      as: 'songs',
+      attributes: [],
+      through: { attributes: [] },
+      where: { status: 'published' },
+      required: false,
+    }],
+    group: ['Genre.id', 'Genre.name'],
+    order: [[literal('plays'), 'DESC'], ['name', 'ASC']],
+    subQuery: false,
+    raw: true,
+  });
 
-  const playsByGenre = genrePlayRows.map((r) => ({
+  const playsByGenre = genreRows.map((r) => ({
     id: Number(r.id),
     name: r.name,
     plays: Number(r.plays || 0),
     songCount: Number(r.song_count || 0),
   }));
 
-  // SUM over zero rows returns NULL, not 0 — and MySQL hands large sums back as a
-  // string. Number(x || 0) normalizes both cases so the frontend always gets a
-  // number and never renders "null".
+  const topTrackRows = await db.Song.findAll({
+    where: { status: 'published' },
+    attributes: ['id', 'title', 'play_count', 'album_id'],
+    include: [{
+      model: db.ArtistProfile,
+      as: 'artistProfile',
+      attributes: ['id', 'stage_name'],
+      required: true,
+    }],
+    order: [['play_count', 'DESC'], ['id', 'ASC']],
+    limit: 5,
+  });
+
+  const topTracks = topTrackRows.map((s) => ({
+    id: s.id,
+    title: s.title,
+    plays: Number(s.play_count || 0),
+    albumId: s.album_id != null ? Number(s.album_id) : null,
+    artist: s.artistProfile
+      ? { id: s.artistProfile.id, stageName: s.artistProfile.stage_name }
+      : null,
+  }));
+
+  const topArtistRows = await db.ArtistProfile.findAll({
+    attributes: [
+      'id',
+      'stage_name',
+      [fn('COALESCE', fn('SUM', col('songs.play_count')), 0), 'plays'],
+    ],
+    include: [
+      {
+        model: db.User,
+        as: 'user',
+        attributes: [],
+        where: { deleted_at: null },
+        required: true,
+      },
+      {
+        model: db.Song,
+        as: 'songs',
+        attributes: [],
+        where: { status: 'published' },
+        required: false,
+      },
+    ],
+    group: ['ArtistProfile.id', 'ArtistProfile.stage_name'],
+    order: [[literal('plays'), 'DESC'], ['stage_name', 'ASC']],
+    limit: 5,
+    subQuery: false,
+    raw: true,
+  });
+
+  const topArtists = topArtistRows.map((r) => ({
+    id: Number(r.id),
+    stageName: r.stage_name,
+    plays: Number(r.plays || 0),
+  }));
+  const PLAYS_WINDOW_DAYS = 14;
+  const windowStart = new Date();
+  windowStart.setHours(0, 0, 0, 0);
+  windowStart.setDate(windowStart.getDate() - (PLAYS_WINDOW_DAYS - 1));
+
+  const dailyRows = await db.PlayHistory.findAll({
+    attributes: [
+      [fn('DATE', col('played_at')), 'day'],
+      [fn('COUNT', col('id')), 'plays'],
+    ],
+    where: {
+      is_self_play: false,
+      played_at: { [Op.gte]: windowStart },
+    },
+    group: [fn('DATE', col('played_at'))],
+    order: [[literal('day'), 'ASC']],
+    raw: true,
+  });
+
+  const playsByDay = new Map();
+  for (const r of dailyRows) {
+    const key = String(r.day).slice(0, 10);
+    playsByDay.set(key, Number(r.plays || 0));
+  }
+
+  const playsOverTime = [];
+  for (let i = 0; i < PLAYS_WINDOW_DAYS; i += 1) {
+    const d = new Date(windowStart);
+    d.setDate(windowStart.getDate() + i);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    playsOverTime.push({ date: key, plays: playsByDay.get(key) ?? 0 });
+  }
   const totalPlays = Number(totalPlaysRow?.total || 0);
 
   return {
@@ -562,10 +632,6 @@ const getMetrics = async ({ actorLevel }) => {
     inactiveUsers,
     canSeeSuperAdmin,
     byRole,
-    // Namespaced rather than flattened onto the root. The dashboard renders these
-    // as their own section, and grouping them keeps the response self-describing —
-    // `metrics.catalog.draftSongs` says what it is; `metrics.draftSongs` next to
-    // `metrics.activeUsers` reads like a pile.
     catalog: {
       totalSongs,
       publishedSongs,
@@ -579,6 +645,9 @@ const getMetrics = async ({ actorLevel }) => {
       pendingArtists: totalArtists - verifiedArtists,
       totalPlays,
       playsByGenre,
+      topTracks,
+      topArtists,
+      playsOverTime,
     },
     inbox: {
       newQueries,
