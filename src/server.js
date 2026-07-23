@@ -34,7 +34,9 @@ app.use(
   })
 );
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ limit: '1mb', extended: true }));
+
 app.use(cookieParser());
 
 app.get('/', (req, res) => {
@@ -47,7 +49,5 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  // Kick off the once-a-minute scheduled-release worker. Lives in-process, so it
-  // runs only while the server runs (see jobs/releaseScheduler.js for the caveat).
   startReleaseScheduler();
 });

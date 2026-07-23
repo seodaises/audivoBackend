@@ -2,22 +2,17 @@
 const authService = require('../services/authService');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
-const ApiError = require('../utils/ApiError');
 const { setAuthCookie, clearAuthCookie } = require('../utils/authCookie');
 
 const register = catchAsync(async (req, res) => {
-  const { email, password, displayName, username, role } = req.body || {};
-  if (!email || !password || !displayName || !username) {
-    throw new ApiError(400, 'email, password, displayName, and username are required');
-  }
+  const { email, password, displayName, username, role } = req.body;
 
   const result = await authService.register({ email, password, displayName, username, role });
   return success(res, 201, 'Registration successful. Check your email to verify your account.', result);
 });
 
 const login = catchAsync(async (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) throw new ApiError(400, 'email and password are required');
+  const { email, password } = req.body;
 
   const result = await authService.login({
     email,
@@ -40,17 +35,13 @@ const loginHistory = catchAsync(async (req, res) => {
 
 const verifyEmail = catchAsync(async (req, res) => {
   const { token } = req.query;
-  if (!token) {
-    throw new ApiError(400, 'token is required');
-  }
 
   const result = await authService.verifyEmail(token);
   return success(res, 200, 'Email verified successfully', result);
 });
 
 const resendVerification = catchAsync(async (req, res) => {
-  const { email } = req.body || {};
-  if (!email) throw new ApiError(400, 'email is required');
+  const { email } = req.body;
 
   await authService.resendVerification({ email });
   // Vague + always 200: never reveal whether the email exists or is verified.
@@ -65,10 +56,7 @@ const logout = catchAsync(async (req, res) => {
 });
 
 const changePassword = catchAsync(async (req, res) => {
-  const { oldPassword, newPassword } = req.body || {};
-  if (!oldPassword || !newPassword) {
-    throw new ApiError(400, 'oldPassword and newPassword are required');
-  }
+  const { oldPassword, newPassword } = req.body;
 
   const result = await authService.changePassword({
     userId: req.user.id,
@@ -80,7 +68,6 @@ const changePassword = catchAsync(async (req, res) => {
 
 const forgotPassword = catchAsync(async (req, res) => {
   const { email } = req.body;
-  if (!email) throw new ApiError(400, 'email is required');
 
   const result = await authService.forgotPassword({ email });
   // Vague + always 200: never reveal whether the email exists.
@@ -90,8 +77,7 @@ const forgotPassword = catchAsync(async (req, res) => {
 });
 
 const resetPassword = catchAsync(async (req, res) => {
-  const { token, newPassword } = req.body || {};
-  if (!token || !newPassword) throw new ApiError(400, 'token and newPassword are required');
+  const { token, newPassword } = req.body;
 
   const result = await authService.resetPassword({ token, newPassword });
   return success(res, 200, 'Password reset successfully', result);
@@ -104,14 +90,13 @@ const getMe = catchAsync(async (req, res) => {
 });
 
 const updateMe = catchAsync(async (req, res) => {
-  const result = await authService.updateMe({ userId: req.user.id, patch: req.body || {} });
+  const result = await authService.updateMe({ userId: req.user.id, patch: req.body });
   return success(res, 200, 'Profile updated', result);
 });
 
 // PATCH /api/auth/me/username — the logged-in user changes their handle.
 const changeUsername = catchAsync(async (req, res) => {
-  const { username } = req.body || {};
-  if (!username) throw new ApiError(400, 'username is required');
+  const { username } = req.body;
 
   const result = await authService.changeUsername({
     userId: req.user.id,
@@ -121,7 +106,7 @@ const changeUsername = catchAsync(async (req, res) => {
 });
 
 const deleteMe = catchAsync(async (req, res) => {
-  const { password } = req.body || {};
+  const { password } = req.body;
   const result = await authService.deleteMe({ userId: req.user.id, password });
   // The account is gone; clear the now-useless auth cookie so it doesn't
   // linger in the browser until natural expiry.

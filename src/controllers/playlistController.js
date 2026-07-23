@@ -4,7 +4,7 @@ const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
 
 const createPlaylist = catchAsync(async (req, res) => {
-  const { title, description, isPublic } = req.body || {};
+  const { title, description, isPublic } = req.body;
   const result = await playlistService.createPlaylist({
     actor: req.user,
     title,
@@ -45,7 +45,7 @@ const getPlaylist = catchAsync(async (req, res) => {
 });
 
 const updatePlaylist = catchAsync(async (req, res) => {
-  const { title, description, isPublic } = req.body || {};
+  const { title, description, isPublic } = req.body;
   const result = await playlistService.updatePlaylist({
     actor: req.user,
     playlistId: req.params.id,
@@ -68,7 +68,7 @@ const deletePlaylist = catchAsync(async (req, res) => {
 // body: { songId, afterPlaylistSongId? }
 // Omit afterPlaylistSongId to append to the end.
 const addTrack = catchAsync(async (req, res) => {
-  const { songId, afterPlaylistSongId } = req.body || {};
+  const { songId, afterPlaylistSongId } = req.body;
   const result = await playlistService.addTrack({
     actor: req.user,
     playlistId: req.params.id,
@@ -93,7 +93,7 @@ const removeTrack = catchAsync(async (req, res) => {
 // PATCH /api/playlists/:id/tracks/:trackId/move
 // body: { afterPlaylistSongId }  — omit/null to move to the front.
 const moveTrack = catchAsync(async (req, res) => {
-  const { afterPlaylistSongId } = req.body || {};
+  const { afterPlaylistSongId } = req.body;
   const result = await playlistService.moveTrack({
     actor: req.user,
     playlistId: req.params.id,

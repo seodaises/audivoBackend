@@ -10,9 +10,7 @@ const playService = require('../services/playService');
 const uploadSong = catchAsync(async (req, res) => {
   if (!req.file) throw new ApiError(400, 'audio file is required');
 
-  const { title, albumId, trackNumber, durationSeconds, genreIds } = req.body || {};
-  if (!title) throw new ApiError(400, 'title is required');
-  if (!albumId) throw new ApiError(400, 'albumId is required');
+  const { title, albumId, trackNumber, durationSeconds, genreIds } = req.body;
 
   const result = await songService.createSong({
     actor: req.user,
@@ -29,7 +27,7 @@ const uploadSong = catchAsync(async (req, res) => {
 // PATCH /api/songs/:id  — edit metadata (not the audio file).
 const updateSong = catchAsync(async (req, res) => {
   const songId = req.params.id;
-  const { title, trackNumber, durationSeconds } = req.body || {};
+  const { title, trackNumber, durationSeconds } = req.body;
   const result = await songService.updateSong({
     actor: req.user,
     songId,
@@ -43,8 +41,7 @@ const updateSong = catchAsync(async (req, res) => {
 // PATCH /api/songs/:id/status  — draft -> published -> archived.
 const updateStatus = catchAsync(async (req, res) => {
   const songId = req.params.id;
-  const { status } = req.body || {};
-  if (!status) throw new ApiError(400, 'status is required');
+  const { status } = req.body;
 
   const result = await songService.setStatus({
     actor: req.user,
@@ -57,8 +54,7 @@ const updateStatus = catchAsync(async (req, res) => {
 // PUT /api/songs/:id/genres  — replace the song's genre set (M2M).
 const setGenres = catchAsync(async (req, res) => {
   const songId = req.params.id;
-  const { genreIds } = req.body || {};
-  if (!Array.isArray(genreIds)) throw new ApiError(400, 'genreIds must be an array');
+  const { genreIds } = req.body;
 
   const result = await songService.setGenres({
     actor: req.user,
@@ -88,7 +84,7 @@ const deleteSong = catchAsync(async (req, res) => {
   const result = await songService.deleteSong({
     actor: req.user,
     songId: req.params.id,
-    password: req.body?.password,   // DELETE with a body; axios sends it, Express parses it
+    password: req.body.password,   // DELETE with a body; axios sends it, Express parses it
   });
   return success(res, 200, 'Song deleted', result);
 });
@@ -97,7 +93,7 @@ const deleteSong = catchAsync(async (req, res) => {
 // Fire-and-forget from the client's point of view: the player doesn't block on
 // this, it just reports that a play happened.
 const recordPlay = catchAsync(async (req, res) => {
-  const { msPlayed, source } = req.body || {};
+  const { msPlayed, source } = req.body;
   const result = await playService.recordPlay({
     actor: req.user,
     songId: req.params.id,

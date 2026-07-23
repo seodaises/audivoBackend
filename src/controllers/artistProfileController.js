@@ -2,12 +2,10 @@
 const artistProfileService = require('../services/artistProfileService');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
-const ApiError = require('../utils/ApiError');
 
 // POST /api/artist/profile  — the logged-in user establishes their artist presence. Verified-artist gate + "one profile per user" rule live in the service.
 const createMyProfile = catchAsync(async (req, res) => {
-  const { stageName, bio, avatarUrl } = req.body || {};
-  if (!stageName) throw new ApiError(400, 'stageName is required');
+  const { stageName, bio, avatarUrl } = req.body;
 
   const result = await artistProfileService.createProfile({
     actor: req.user,
@@ -20,7 +18,7 @@ const createMyProfile = catchAsync(async (req, res) => {
 
 // PATCH /api/artist/profile  — edit own profile fields.
 const updateMyProfile = catchAsync(async (req, res) => {
-  const { stageName, bio, avatarUrl } = req.body || {};
+  const { stageName, bio, avatarUrl } = req.body;
   const result = await artistProfileService.updateProfile({
     actor: req.user,
     stageName,

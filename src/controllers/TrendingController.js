@@ -1,5 +1,5 @@
 'use strict';
-const trendingService = require('../services/trendingService');
+const trendingService = require('../services/TrendingService');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
 

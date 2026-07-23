@@ -2,7 +2,6 @@
 const adminService = require('../services/adminService');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
-const ApiError = require('../utils/ApiError');
 
 const listUsers = catchAsync(async (req, res) => {
   const { page, limit, search } = req.query;
@@ -25,7 +24,6 @@ const listAdmins = catchAsync(async (req, res) => {
 // GET /api/admin/users/search?username=
 const searchByUsername = catchAsync(async (req, res) => {
   const { username } = req.query;
-  if (!username) throw new ApiError(400, 'username query param is required');
 
   const result = await adminService.findByUsername({ username });
   return success(res, 200, 'User found', result);
@@ -34,8 +32,7 @@ const searchByUsername = catchAsync(async (req, res) => {
 // PATCH /api/admin/users/:id/role   body: { role: "Admin" }
 const changeUserRole = catchAsync(async (req, res) => {
   const targetUserId = req.params.id;
-  const { role } = req.body || {};
-  if (!role) throw new ApiError(400, 'role is required');
+  const { role } = req.body;
 
   const result = await adminService.changeUserRole({
     actor: req.user,          // carries id + level (set by protect + requireMinLevel)
@@ -47,7 +44,7 @@ const changeUserRole = catchAsync(async (req, res) => {
 
 // POST /api/admin/users   body: { email, displayName, username }
 const createUser = catchAsync(async (req, res) => {
-  const { email, displayName, username } = req.body || {};
+  const { email, displayName, username } = req.body;
   const result = await adminService.createUser({
     actor: req.user,
     email,
@@ -60,12 +57,7 @@ const createUser = catchAsync(async (req, res) => {
 // PATCH /api/admin/users/:id/status   body: { isActive: boolean }
 const setStatus = catchAsync(async (req, res) => {
   const targetUserId = req.params.id;
-  const { isActive } = req.body || {};
-
-  // Must be a real boolean — guards against "true" (string) or a missing field.
-  if (typeof isActive !== 'boolean') {
-    throw new ApiError(400, 'isActive must be true or false');
-  }
+  const { isActive } = req.body;
 
   const result = await adminService.setUserStatus({
     actor: req.user,
@@ -128,8 +120,7 @@ const listContactMessages = catchAsync(async (req, res) => {
 
 // PATCH /api/admin/contact-messages/:id/status   body: { status: "resolved" }
 const setContactStatus = catchAsync(async (req, res) => {
-  const { status } = req.body || {};
-  if (!status) throw new ApiError(400, 'status is required');
+  const { status } = req.body;
 
   const result = await adminService.setContactStatus({
     actor: req.user,               // stamped as handler when resolving

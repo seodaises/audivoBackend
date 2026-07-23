@@ -151,13 +151,25 @@ const getPublicProfile = async ({ username }) => {
   const profile = await db.ArtistProfile.findOne({ where: { user_id: user.id } });
   if (!profile) throw new ApiError(404, 'This user is not an artist');
 
+// Public discography is capped, not paginated. A normal artist has well under
+  // 100 releases so this is invisible to them; the cap only bites a label-scale
+  // or decade-deep catalog, where returning EVERY row on this public, high-traffic
+  // page would ship a multi-MB payload on each view. 100 matches the ceiling the
+  // paginate() helper enforces everywhere else, so the whole API tops out in one
+  // place. Newest-first ordering means the cap drops the OLDEST rows, which is the
+  // right thing to lose if anything must be lost. Full pagination of this list is
+  // noted as follow-up work; until then this is the safe bound.
+  const PUBLIC_DISCOGRAPHY_CAP = 100;
+
   const albums = await db.Album.findAll({
     where: { artist_profile_id: profile.id, status: 'published' },
     order: [['release_date', 'DESC'], ['id', 'DESC']],
+    limit: PUBLIC_DISCOGRAPHY_CAP,
   });
   const songs = await db.Song.findAll({
     where: { artist_profile_id: profile.id, status: 'published' },
     order: [['id', 'DESC']],
+    limit: PUBLIC_DISCOGRAPHY_CAP,
   });
 
   return {
