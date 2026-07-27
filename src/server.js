@@ -4,6 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const errorHandler = require('./middlewares/errorHandler');
+const { apiLimiter } = require('./middlewares/rateLimiters');
 const routes = require('./routes');
 const { startReleaseScheduler } = require('./jobs/releaseScheduler');
 
@@ -43,7 +44,7 @@ app.get('/', (req, res) => {
   res.json({ message: 'Audivo backend is running' });
 });
 
-app.use('/api', routes);
+app.use('/api', apiLimiter, routes);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;

@@ -223,10 +223,11 @@ const resetPassword = async ({ token, newPassword }) => {
 };
 
 const getLoginHistory = async ({ userId, limit = 20 }) => {
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
   const rows = await db.LoginHistory.findAll({
     where: { user_id: userId },
     order: [['created_at', 'DESC']],
-    limit,
+    limit: lim,
   });
   return rows.map((r) => ({
     id: r.id,

@@ -47,4 +47,13 @@ const uploadLimiter = rateLimit({
     error(res, 429, 'Upload limit reached. Please try again later.'),
 });
 
-module.exports = { authLimiter, emailLimiter, socialLimiter, uploadLimiter };
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000,                // generous floor — normal use never approaches this
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) =>
+    error(res, 429, 'Too many requests. Please slow down and try again shortly.'),
+});
+
+module.exports = { apiLimiter, authLimiter, emailLimiter, socialLimiter, uploadLimiter };
