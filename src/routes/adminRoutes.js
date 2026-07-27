@@ -17,9 +17,6 @@ router.get('/users', protect, requireMinLevel(ADMIN), validate(v.listUsers), adm
 // List Admin accounts (the Manage Admins table). Super Admin only.
 router.get('/admins', protect, requireMinLevel(SUPER_ADMIN), validate(v.listAdmins), adminController.listAdmins);
 
-// Exact-username lookup (the +Add Admin search bar).
-router.get('/users/search', protect, requireMinLevel(ADMIN), validate(v.searchByUsername), adminController.searchByUsername);
-
 router.patch('/users/:id/role', protect, requireMinLevel(SUPER_ADMIN), validate(v.changeUserRole), adminController.changeUserRole);
 
 // Create a new Admin account with a one-time password (emailed + returned once).

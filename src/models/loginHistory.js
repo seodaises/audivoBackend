@@ -19,6 +19,8 @@ module.exports = (sequelize, DataTypes) => {
       modelName: 'LoginHistory',
       tableName: 'login_history',
       underscored: true,
+      timestamps: true,
+      createdAt: 'created_at',
       updatedAt: false, // matches the table — created_at only
     }
   );

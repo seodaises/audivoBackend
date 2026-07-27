@@ -39,16 +39,6 @@ const listUsers = { query: pagination };
 // GET /admin/admins
 const listAdmins = { query: pagination };
 
-// GET /admin/users/search?username=
-const searchByUsername = {
-  query: Joi.object({
-    username: Joi.string().trim().min(1).max(20).required().messages({
-      'string.empty': 'username query param is required',
-      'any.required': 'username query param is required',
-    }),
-  }).unknown(true),
-};
-
 // PATCH /admin/users/:id/role
 const changeUserRole = {
   params: idParam,
@@ -121,7 +111,6 @@ const setContactStatus = {
 module.exports = {
   listUsers,
   listAdmins,
-  searchByUsername,
   changeUserRole,
   createUser,
   setStatus,

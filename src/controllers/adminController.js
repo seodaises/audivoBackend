@@ -21,14 +21,6 @@ const listAdmins = catchAsync(async (req, res) => {
   return success(res, 200, 'Admins retrieved', result);
 });
 
-// GET /api/admin/users/search?username=
-const searchByUsername = catchAsync(async (req, res) => {
-  const { username } = req.query;
-
-  const result = await adminService.findByUsername({ username });
-  return success(res, 200, 'User found', result);
-});
-
 // PATCH /api/admin/users/:id/role   body: { role: "Admin" }
 const changeUserRole = catchAsync(async (req, res) => {
   const targetUserId = req.params.id;
@@ -133,7 +125,6 @@ const setContactStatus = catchAsync(async (req, res) => {
 module.exports = {
   listUsers,
   listAdmins,
-  searchByUsername,
   changeUserRole,
   createUser,
   setStatus,
