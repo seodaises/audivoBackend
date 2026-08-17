@@ -7,8 +7,6 @@ const WEIGHT_PLAY = 1;
 const WEIGHT_LIKE = 2;
 const WEIGHT_SAVE = 3;
 
-// The rolling window. 30 days is long enough that a small catalogue still
-// produces a non-empty list, short enough that the ranking actually moves.
 const WINDOW_DAYS = 30;
 
 const windowStart = () => new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
@@ -16,14 +14,6 @@ const windowStart = () => new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 100
 const clampLimit = (limit, fallback = 10, max = 50) =>
   Math.min(Math.max(parseInt(limit, 10) || fallback, 1), max);
 
-// Counting helper. Every trending query is the same shape: count rows in one
-// table, inside the window, grouped by a foreign key. Doing it as three small
-// grouped queries and combining in JS — rather than one query with three
-// correlated subqueries — keeps each query trivially readable and avoids the
-// row-multiplication trap where joining plays AND likes AND saves in a single
-// statement multiplies counts by each other.
-//
-// Returns a Map of key -> count.
 const countByKey = async ({ model, keyColumn, dateColumn, since, extraWhere = {}, include = [] }) => {
   const rows = await model.findAll({
     attributes: [[col(keyColumn), 'key'], [fn('COUNT', literal('*')), 'n']],
@@ -59,9 +49,6 @@ const scoreAndRank = ({ plays, likes, saves, limit }) => {
     .map((row, i) => ({ ...row, rank: i + 1 }));
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SONGS
-// ─────────────────────────────────────────────────────────────────────────────
 const trendingSongs = async ({ limit } = {}) => {
   const lim = clampLimit(limit);
   const since = windowStart();
@@ -81,9 +68,6 @@ const trendingSongs = async ({ limit } = {}) => {
     countByKey({ model: db.SavedSong, keyColumn: 'song_id', dateColumn: 'created_at', since }),
   ]);
 
-  // Over-fetch before the status filter: a song can score well and then turn out
-  // to be archived, and dropping it after slicing to `limit` would silently
-  // return a short list. Scoring a wider set and trimming after keeps it full.
   const ranked = scoreAndRank({ plays, likes, saves, limit: lim * 3 });
   if (ranked.length === 0) return { songs: [], window: { days: WINDOW_DAYS, since } };
 
@@ -104,7 +88,7 @@ const trendingSongs = async ({ limit } = {}) => {
           required: true,
         }],
       },
-      { model: db.Album, as: 'album', attributes: ['id', 'title', 'cover_url'], required: false },
+       { model: db.Album, as: 'album', attributes: ['id', 'public_id', 'title', 'cover_url'], required: false },
     ],
   });
 
@@ -119,9 +103,11 @@ const trendingSongs = async ({ limit } = {}) => {
         return {
           // Same row shape browseSongs returns, so SongCard binds with no adapter.
           id: s.id,
+          publicId: s.public_id,
           title: s.title,
           albumId: s.album_id,
-          album: s.album ? { id: s.album.id, title: s.album.title } : null,
+          albumPublicId: s.album ? s.album.public_id : null,
+          album: s.album ? { id: s.album.id, publicId: s.album.public_id, title: s.album.title } : null,
           coverUrl: s.album ? (s.album.cover_url ?? null) : null,
           artist: s.artistProfile
             ? {
@@ -144,15 +130,7 @@ const trendingSongs = async ({ limit } = {}) => {
   };
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ALBUMS
-//
-// An album has no plays of its own — it inherits them from its songs. Album
-// likes don't exist as a concept, so the signals are: plays of its tracks, and
-// saves of the album itself. Summed, not averaged: a 12-track album genuinely
-// generating more listening IS trending harder than a 3-track one. Averaging
-// would be defensible too, but sum is the simpler claim to defend.
-// ─────────────────────────────────────────────────────────────────────────────
+
 const trendingAlbums = async ({ limit } = {}) => {
   const lim = clampLimit(limit);
   const since = windowStart();
@@ -164,11 +142,6 @@ const trendingAlbums = async ({ limit } = {}) => {
       dateColumn: 'played_at',
       since,
       extraWhere: { is_self_play: false },
-      // The joined song must be PUBLISHED. Without this the aggregate counts
-      // plays of archived or draft tracks toward their album's score — an
-      // artist could archive a song and it would still push the album up the
-      // chart. `required: true` makes it an INNER JOIN so non-matching rows
-      // drop out of the count entirely.
       include: [{
         model: db.Song, as: 'song', attributes: [],
         where: { status: 'published' }, required: true,
@@ -202,8 +175,9 @@ const trendingAlbums = async ({ limit } = {}) => {
       .slice(0, lim)
       .map((r, i) => {
         const a = byId.get(r.id);
-        return {
+         return {
           id: a.id,
+          publicId: a.public_id,
           title: a.title,
           coverUrl: a.cover_url ?? null,
           releaseDate: a.release_date ?? null,
@@ -225,13 +199,6 @@ const trendingAlbums = async ({ limit } = {}) => {
   };
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ARTISTS
-//
-// Signals: plays of their songs, plus new follows in the window. Follows are
-// weighted as saves — following an artist is the same kind of commitment as
-// saving a track, arguably stronger.
-// ─────────────────────────────────────────────────────────────────────────────
 const trendingArtists = async ({ limit } = {}) => {
   const lim = clampLimit(limit);
   const since = windowStart();

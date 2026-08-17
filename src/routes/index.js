@@ -13,5 +13,6 @@ router.use('/admin/catalog', require('./adminCatalogRoutes'));
 router.use('/me', require('./socialRoutes'));
 router.use('/playlists', require('./playlistRoutes'));
 router.use('/comments', require('./commentRoutes'));
+router.use('/notifications', require('./notificationRoutes'));
 
 module.exports = router;

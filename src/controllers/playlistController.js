@@ -15,8 +15,8 @@ const createPlaylist = catchAsync(async (req, res) => {
 });
 
 const listMyPlaylists = catchAsync(async (req, res) => {
-  const { page, limit } = req.query;
-  const result = await playlistService.listMyPlaylists({ actor: req.user, page, limit });
+  const { page, limit, songId } = req.query;
+  const result = await playlistService.listMyPlaylists({ actor: req.user, page, limit, songId });
   return success(res, 200, 'Playlists', result);
 });
 

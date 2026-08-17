@@ -69,6 +69,21 @@ const createSong = async ({ actor, title, albumId, trackNumber, durationSeconds,
     }
 
     const result = await db.sequelize.transaction(async (t) => {
+      if (album.is_single) {
+        // Lock the album row so two concurrent uploads can't both pass this
+        // check before either INSERT commits (classic TOCTOU race).
+        await db.Album.findByPk(album.id, { transaction: t, lock: t.LOCK.UPDATE });
+
+        // A single holds exactly one song, ever — archived doesn't free the slot.
+        const existingCount = await db.Song.count({
+          where: { album_id: album.id },
+          transaction: t,
+        });
+        if (existingCount >= 1) {
+          throw new ApiError(409, 'This is a single and can only contain one song.');
+        }
+      }
+
       const song = await db.Song.create(
         {
           album_id: album.id,
@@ -195,9 +210,6 @@ const setGenres = async ({ actor, songId, genreIds }) => {
     genres: genres.map((g) => ({ id: g.id, name: g.name })),
   };
 };
-
-// Resolve the on-disk file for the serve endpoint, enforcing visibility.
-// Published -> anyone. Draft/archived -> owner only. actor may be undefined.
 const resolvePlayableFile = async ({ actor, songId }) => {
   const song = await db.Song.findByPk(songId);
   if (!song) throw new ApiError(404, 'Song not found');
@@ -226,4 +238,5 @@ module.exports = {
   setGenres,
   resolvePlayableFile,
   songRow,
+  loadOwnedSong,
 };

@@ -33,7 +33,7 @@ const listAllSongs = async ({ page, limit, status, search } = {}) => {
     where,
     include: [
       { model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'] },
-      { model: db.Album, as: 'album', attributes: ['id', 'title'] },
+      { model: db.Album, as: 'album', attributes: ['id', 'public_id' ,'title'] },
       { model: db.Genre, as: 'genres', attributes: ['id', 'name'], through: { attributes: [] } },
     ],
     order: [['id', 'DESC']],
@@ -46,8 +46,10 @@ const listAllSongs = async ({ page, limit, status, search } = {}) => {
   return {
     songs: rows.map((s) => ({
       id: s.id,
+      publicId: s.public_id,
       title: s.title,
       albumId: s.album_id,
+      albumPublicId: s.album ? s.album.public_id : null,
       status: s.status,
       archivedBy: s.archived_by ?? null,
       isLocked: s.status === 'archived' && s.archived_by === 'admin',
@@ -58,7 +60,7 @@ const listAllSongs = async ({ page, limit, status, search } = {}) => {
       artist: s.artistProfile
         ? { id: s.artistProfile.id, stageName: s.artistProfile.stage_name }
         : null,
-      album: s.album ? { id: s.album.id, title: s.album.title } : null,
+      album: s.album ? { id: s.album.id, publicId: s.album.public_id, title: s.album.title } : null,
       genres: (s.genres || []).map((g) => ({ id: g.id, name: g.name })),
     })),
     pagination: pageMeta(count, safePage, safeLimit),
@@ -77,8 +79,6 @@ const listAllAlbums = async ({ page, limit, status, search } = {}) => {
     where,
     attributes: {
       include: [
-        // Same correlated-subquery reasoning as listAllArtists: joining songs to
-        // count them would multiply the album rows and break LIMIT.
         [literal('(SELECT COUNT(*) FROM songs WHERE songs.album_id = `Album`.`id`)'), 'track_count'],
       ],
     },
@@ -93,6 +93,7 @@ const listAllAlbums = async ({ page, limit, status, search } = {}) => {
   return {
     albums: rows.map((a) => ({
       id: a.id,
+      publicId: a.public_id,
       title: a.title,
       status: a.status,
       isSingle: a.is_single,
@@ -176,6 +177,44 @@ const setSongStatus = async ({ actor, songId, status }) => {
   return { id: song.id, status: song.status };
 };
 
+const bulkSetSongStatus = async ({ actor, ids, status }) => {
+  if (!VALID_STATUSES.includes(status)) {
+    throw new ApiError(400, `status must be one of: ${VALID_STATUSES.join(', ')}`);
+  }
+  const [updatedCount] = await db.Song.update(
+    { status, archived_by: status === 'archived' ? 'admin' : null },
+    { where: { id: { [Op.in]: ids } } }
+  );
+  return { requested: ids.length, updated: updatedCount, status };
+};
+
+const applyAlbumStatus = async (album, status, transaction) => {
+  album.status = status;
+  album.archived_by = status === 'archived' ? 'admin' : null;
+  await album.save({ transaction });
+
+  if (status === 'published') {
+    await db.Song.update(
+      { status: 'published', archived_by: null },
+      {
+        where: {
+          album_id: album.id,
+          [Op.or]: [
+            { status: 'draft' },
+            { status: 'archived', archived_by: 'album' },
+          ],
+        },
+        transaction,
+      }
+    );
+  } else if (status === 'archived') {
+    await db.Song.update(
+      { status: 'archived', archived_by: 'album' },
+      { where: { album_id: album.id, status: { [Op.ne]: 'archived' } }, transaction }
+    );
+  }
+};
+
 const setAlbumStatus = async ({ actor, albumId, status }) => {
   if (!VALID_STATUSES.includes(status)) {
     throw new ApiError(400, `status must be one of: ${VALID_STATUSES.join(', ')}`);
@@ -183,26 +222,28 @@ const setAlbumStatus = async ({ actor, albumId, status }) => {
   const album = await db.Album.findByPk(albumId);
   if (!album) throw new ApiError(404, 'Album not found');
 
-  await db.sequelize.transaction(async (t) => {
-    album.status = status;
-    album.archived_by = status === 'archived' ? 'admin' : null;
-    await album.save({ transaction: t });
-
-    if (status === 'published') {
-      await db.Song.update(
-        { status: 'published', archived_by: null },
-        { where: { album_id: album.id, status: { [Op.ne]: 'published' } }, transaction: t }
-      );
-    } else if (status === 'archived') {
-      await db.Song.update(
-        { status: 'archived', archived_by: 'album' },
-        { where: { album_id: album.id, status: { [Op.ne]: 'archived' } }, transaction: t }
-      );
-    }
-  });
+  await db.sequelize.transaction(async (t) => applyAlbumStatus(album, status, t));
 
   return { id: album.id, status: album.status };
 };
+
+const bulkSetAlbumStatus = async ({ actor, ids, status }) => {
+  if (!VALID_STATUSES.includes(status)) {
+    throw new ApiError(400, `status must be one of: ${VALID_STATUSES.join(', ')}`);
+  }
+
+  let updated = 0;
+  await db.sequelize.transaction(async (t) => {
+    const albums = await db.Album.findAll({ where: { id: { [Op.in]: ids } }, transaction: t });
+    for (const album of albums) {
+      await applyAlbumStatus(album, status, t);
+      updated += 1;
+    }
+  });
+
+  return { requested: ids.length, updated, status };
+};
+
 const adminDeleteSong = async ({ songId }) => {
   const song = await db.Song.findByPk(songId, { attributes: ['id', 'storage_key'] });
   if (!song) throw new ApiError(404, 'Song not found');
@@ -214,7 +255,6 @@ const adminDeleteSong = async ({ songId }) => {
     await song.destroy({ transaction: t });
   });
 
-  // Outside the transaction, deliberately. A DB rollback can't un-delete a file, so the file goes last — after the rows are safely gone. Worst case we leak anorphaned file (recoverable, and already on the backlog); the alternative is deleting audio for a row that then fails to commit (not recoverable).
   deleteAudioFile(storageKey);
 
   return { id: Number(songId), deleted: true };
@@ -244,4 +284,14 @@ const adminDeleteAlbum = async ({ albumId }) => {
   return { id: Number(albumId), deleted: true, songsDeleted: songIds.length };
 };
 
-module.exports = { listAllSongs, listAllAlbums, listAllArtists, setSongStatus, setAlbumStatus, adminDeleteSong, adminDeleteAlbum };
+module.exports = {
+  listAllSongs,
+  listAllAlbums,
+  listAllArtists,
+  setSongStatus,
+  setAlbumStatus,
+  bulkSetSongStatus,
+  bulkSetAlbumStatus,
+  adminDeleteSong,
+  adminDeleteAlbum,
+};

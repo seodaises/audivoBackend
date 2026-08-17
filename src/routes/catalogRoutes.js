@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const catalogController = require('../controllers/catalogController');
-const trendingController = require('../controllers/TrendingController');
+const trendingController = require('../controllers/trendingController');
 const artistProfileController = require('../controllers/artistProfileController');
 const { protect } = require('../middlewares/authMiddleware');
 const validate = require('../middlewares/validate');
@@ -11,6 +11,7 @@ const tv = require('../validators/trendingValidators');
 const av = require('../validators/artistValidators');
 
 router.get('/songs', protect, validate(cv.browseSongs), catalogController.browseSongs);
+router.get('/songs/:publicId', protect, validate(cv.getSong), catalogController.getSong);
 router.get('/albums', protect, validate(cv.browseAlbums), catalogController.browseAlbums);
 router.get('/artists', protect, validate(cv.browseArtists), catalogController.browseArtists);
 router.get('/search', protect, validate(cv.search), catalogController.search);

@@ -23,11 +23,25 @@ const adminSetSongStatus = catchAsync(async (req, res) => {
   return success(res, 200, 'Song status updated', result);
 });
 
+// PATCH /admin/catalog/songs/bulk-status  { ids: [...], status }
+const adminBulkSetSongStatus = catchAsync(async (req, res) => {
+  const { ids, status } = req.body;
+  const result = await adminCatalogService.bulkSetSongStatus({ actor: req.user, ids, status });
+  return success(res, 200, `${result.updated} of ${result.requested} songs updated`, result);
+});
+
 const adminSetAlbumStatus = catchAsync(async (req, res) => {
   const albumId = req.params.id;
   const { status } = req.body;
   const result = await adminCatalogService.setAlbumStatus({ actor: req.user, albumId, status });
   return success(res, 200, 'Album status updated', result);
+});
+
+// PATCH /admin/catalog/albums/bulk-status  { ids: [...], status }
+const adminBulkSetAlbumStatus = catchAsync(async (req, res) => {
+  const { ids, status } = req.body;
+  const result = await adminCatalogService.bulkSetAlbumStatus({ actor: req.user, ids, status });
+  return success(res, 200, `${result.updated} of ${result.requested} albums updated`, result);
 });
 
 // GET /admin/catalog/artists?verified=true|false  — list artist profiles for the manage-artists page. Omit `verified` for all; pass false to see the approval queue (unverified artists awaiting verification).
@@ -63,7 +77,9 @@ module.exports = {
   listAllAlbums,
   listAllArtists,
   adminSetSongStatus,
+  adminBulkSetSongStatus,
   adminSetAlbumStatus,
+  adminBulkSetAlbumStatus,
   adminVerifyArtist,
   adminDeleteSong,
   adminDeleteAlbum,

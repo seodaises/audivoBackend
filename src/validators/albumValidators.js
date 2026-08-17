@@ -1,24 +1,27 @@
 'use strict';
 const Joi = require('joi');
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Album validation schemas.
-//
-// title        albums.title        STRING(255) NOT NULL
-// coverUrl     albums.cover_url     STRING(2048), http(s) (model validates URL)
-// description  albums.description   TEXT (no length cap — but we set a sane 5000)
-// releaseDate  albums.release_date  DATEONLY ('YYYY-MM-DD') — display only
-// isSingle     albums.is_single     BOOLEAN
-// status       via albumService.VALID_STATUSES = draft|published|archived
-// releaseAt    albums.release_at    DATE — future instant for a scheduled release
-// ─────────────────────────────────────────────────────────────────────────────
-
 const idParam = {
   params: Joi.object({
     id: Joi.number().integer().positive().required().messages({
       'number.base': 'id must be a number',
       'any.required': 'id is required',
     }),
+  }),
+};
+
+const idOrPublicId = {
+  params: Joi.object({
+    id: Joi.alternatives()
+      .try(
+        Joi.number().integer().positive(),
+        Joi.string().guid()
+      )
+      .required()
+      .messages({
+        'alternatives.match': 'id must be a positive number or a valid public id',
+        'any.required': 'id is required',
+      }),
   }),
 };
 
@@ -99,8 +102,8 @@ const scheduleRelease = {
 // DELETE /albums/:id/schedule
 const cancelSchedule = { params: idParam.params };
 
-// GET /albums/:id
-const getAlbum = { params: idParam.params };
+// GET /albums/:id — :id may be the integer PK or the album's public_id (UUID).
+const getAlbum = { params: idOrPublicId.params };
 
 // DELETE /albums/:id — optional password confirm.
 const deleteAlbum = {

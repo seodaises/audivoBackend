@@ -1,5 +1,6 @@
 'use strict';
 const db = require('../models');
+const ApiError = require('../utils/ApiError');
 const { Op } = db.Sequelize;
 
 const paginate = ({ page, limit }) => {
@@ -20,7 +21,7 @@ const browseSongs = async ({ page, limit, genre } = {}) => {
       model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'],
       include: [{ model: db.User, as: 'user', attributes: ['username'] }],
     },
-    { model: db.Album, as: 'album', attributes: ['id', 'title', 'cover_url'] },
+    { model: db.Album, as: 'album', attributes: ['id', 'public_id', 'title', 'cover_url'] },
   ];
   if (genre) {
     include.push({
@@ -46,9 +47,11 @@ const browseSongs = async ({ page, limit, genre } = {}) => {
   return {
     songs: rows.map((s) => ({
       id: s.id,
+      publicId: s.public_id,
       title: s.title,
       albumId: s.album_id,
-      album: s.album ? { id: s.album.id, title: s.album.title } : null,
+      albumPublicId: s.album ? s.album.public_id : null,
+      album: s.album ? { id: s.album.id, publicId: s.album.public_id, title: s.album.title } : null,
       coverUrl: s.album ? (s.album.cover_url ?? null) : null,
       artist: s.artistProfile
         ? {
@@ -64,10 +67,26 @@ const browseSongs = async ({ page, limit, genre } = {}) => {
   };
 };
 
-const browseAlbums = async ({ page, limit } = {}) => {
+const browseAlbums = async ({ page, limit, genre } = {}) => {
   const { safeLimit, safePage, offset } = paginate({ page, limit });
+
+  const where = { status: 'published' };
+  if (genre) {
+    const matchingAlbumIds = await db.Song.findAll({
+      attributes: ['album_id'],
+      where: { status: 'published', album_id: { [Op.ne]: null } },
+      include: [{
+        model: db.Genre, as: 'genres', attributes: [],
+        where: { id: Number(genre) }, through: { attributes: [] }, required: true,
+      }],
+      group: ['album_id'],
+      raw: true,
+    });
+    where.id = matchingAlbumIds.map((r) => r.album_id);
+  }
+
   const { count, rows } = await db.Album.findAndCountAll({
-    where: { status: 'published' },
+    where,
     include: [{
       model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'],
       include: [{ model: db.User, as: 'user', attributes: ['username'] }],
@@ -79,7 +98,7 @@ const browseAlbums = async ({ page, limit } = {}) => {
   });
   return {
     albums: rows.map((a) => ({
-      id: a.id, title: a.title, coverUrl: a.cover_url ?? null,
+      id: a.id, publicId: a.public_id, title: a.title, coverUrl: a.cover_url ?? null,
       isSingle: a.is_single, releaseDate: a.release_date ?? null,
       artist: a.artistProfile
         ? {
@@ -138,7 +157,7 @@ const search = async ({ q, page, limit } = {}) => {
         model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'],
         include: [{ model: db.User, as: 'user', attributes: ['username'] }],
       },
-      { model: db.Album, as: 'album', attributes: ['id', 'title', 'cover_url'] },
+      { model: db.Album, as: 'album', attributes: ['id', 'public_id', 'title', 'cover_url'] },
     ],
     limit: safeLimit,
     order: [['id', 'DESC']],
@@ -169,14 +188,15 @@ const search = async ({ q, page, limit } = {}) => {
   return {
     query: term,
     songs: songs.map((s) => ({
-      id: s.id, title: s.title,
+      id: s.id, publicId: s.public_id, title: s.title,
       albumId: s.album_id,
-      album: s.album ? { id: s.album.id, title: s.album.title } : null,
+      albumPublicId: s.album ? s.album.public_id : null,
+      album: s.album ? { id: s.album.id, publicId: s.album.public_id, title: s.album.title } : null,
       coverUrl: s.album ? (s.album.cover_url ?? null) : null,
       artist: s.artistProfile ? { id: s.artistProfile.id, stageName: s.artistProfile.stage_name } : null,
     })),
     albums: albums.map((a) => ({
-      id: a.id, title: a.title,
+      id: a.id, publicId: a.public_id, title: a.title,
       coverUrl: a.cover_url ?? null,
       artist: a.artistProfile ? { id: a.artistProfile.id, stageName: a.artistProfile.stage_name } : null,
     })),
@@ -190,4 +210,51 @@ const search = async ({ q, page, limit } = {}) => {
   };
 };
 
-module.exports = { browseSongs, browseAlbums, browseArtists, search };
+const getSongByPublicId = async ({ actor, publicId }) => {
+  const song = await db.Song.findOne({
+    where: { public_id: publicId },
+    include: [
+      {
+        model: db.ArtistProfile, as: 'artistProfile', attributes: ['id', 'stage_name'],
+        include: [{ model: db.User, as: 'user', attributes: ['username'] }],
+      },
+      { model: db.Album, as: 'album', attributes: ['id', 'public_id', 'title', 'cover_url'] },
+    ],
+  });
+  if (!song) throw new ApiError(404, 'Song not found');
+
+  let isOwner = false;
+  if (actor && actor.id) {
+    const profile = await db.ArtistProfile.findOne({ where: { user_id: actor.id } });
+    isOwner = Boolean(profile) && profile.id === song.artist_profile_id;
+  }
+  if (song.status !== 'published' && !isOwner) {
+    throw new ApiError(404, 'Song not found');
+  }
+
+  return {
+    id: song.id,               // internal — streams the gated file + social actions
+    publicId: song.public_id,  // the address the client actually uses
+    title: song.title,
+    durationSeconds: song.duration_seconds ?? null,
+    trackNumber: song.track_number ?? null,
+    playCount: song.play_count ?? 0,
+    status: song.status,
+    coverUrl: song.album ? (song.album.cover_url ?? null) : null,
+    albumId: song.album_id,
+    albumPublicId: song.album ? song.album.public_id : null,
+    album: song.album
+      ? { id: song.album.id, publicId: song.album.public_id, title: song.album.title }
+      : null,
+    artist: song.artistProfile
+      ? {
+          id: song.artistProfile.id,
+          stageName: song.artistProfile.stage_name,
+          username: song.artistProfile.user ? song.artistProfile.user.username : null,
+        }
+      : null,
+    isOwner,
+  };
+};
+
+module.exports = { browseSongs, browseAlbums, browseArtists, search, getSongByPublicId };

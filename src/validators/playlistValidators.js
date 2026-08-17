@@ -41,7 +41,12 @@ const createPlaylist = {
 };
 
 // GET /playlists
-const listMyPlaylists = { query: pagination };
+// GET /playlists?page=&limit=&songId=
+const listMyPlaylists = { query: pagination.keys({
+  songId: Joi.number().integer().positive().optional().messages({
+    'number.base': 'songId must be a number',
+  }),
+}) };
 
 // GET /playlists/public
 const listPublicPlaylists = { query: paginationWithSearch };

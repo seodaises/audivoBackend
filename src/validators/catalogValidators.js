@@ -13,8 +13,15 @@ const browseSongs = {
   }),
 };
 
-// GET /catalog/albums  &  /catalog/artists
-const browseAlbums = { query: pagination };
+// GET /catalog/albums?page=&limit=&genre=
+const browseAlbums = {
+  query: pagination.keys({
+    genre: Joi.alternatives()
+      .try(Joi.number().integer().positive(), Joi.string().trim().max(100))
+      .optional(),
+  }),
+};
+// GET /catalog/artists
 const browseArtists = { query: pagination };
 
 // GET /catalog/search?q=&page=&limit=
@@ -27,4 +34,15 @@ const search = {
   }),
 };
 
-module.exports = { browseSongs, browseAlbums, browseArtists, search };
+// GET /catalog/songs/:publicId — single song by its opaque public_id (UUID).
+const getSong = {
+  params: Joi.object({
+    publicId: Joi.string().guid().required().messages({
+      'string.guid': 'publicId must be a valid public id',
+      'string.empty': 'publicId is required',
+      'any.required': 'publicId is required',
+    }),
+  }),
+};
+
+module.exports = { browseSongs, browseAlbums, browseArtists, search, getSong };

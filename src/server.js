@@ -7,6 +7,7 @@ const errorHandler = require('./middlewares/errorHandler');
 const { apiLimiter } = require('./middlewares/rateLimiters');
 const routes = require('./routes');
 const { startReleaseScheduler } = require('./jobs/releaseScheduler');
+const { startLyricsWorker } = require('./workers/lyricsWorker');
 
 const app = express();
 
@@ -18,8 +19,6 @@ app.use(
 
 const allowedOrigins = [
   process.env.FRONTEND_ORIGIN,
-  'http://localhost:8080',
-  'http://localhost:4173',
 ].filter(Boolean);
 
 app.use(
@@ -51,4 +50,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   startReleaseScheduler();
+  startLyricsWorker();
 });

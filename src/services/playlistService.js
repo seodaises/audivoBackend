@@ -31,13 +31,6 @@ const cleanTitle = (title) => {
   return t;
 };
 
-// ── Access rules ─────────────────────────────────────────────────────────────
-//
-// Two different questions, two different helpers. Conflating them is how you
-// end up letting a stranger rename someone else's playlist.
-//
-//   canRead  — mine, OR public. (A public playlist is readable by anyone.)
-//   canWrite — mine. Full stop. Public does not mean editable.
 
 const findPlaylistOr404 = async (id) => {
   const playlist = await db.Playlist.findOne({ where: { id, deleted_at: null } });
@@ -83,12 +76,15 @@ const trackRow = (ps) => ({
   song: ps.song
     ? {
         id: ps.song.id,
+        publicId: ps.song.public_id,
         title: ps.song.title,
         durationSeconds: ps.song.duration_seconds ?? null,
         playCount: ps.song.play_count ?? 0,
+        albumPublicId: ps.song.album ? ps.song.album.public_id : null,
         album: ps.song.album
           ? {
               id: ps.song.album.id,
+              publicId: ps.song.album.public_id,
               title: ps.song.album.title,
               coverUrl: ps.song.album.cover_url ?? null,
             }
@@ -118,7 +114,7 @@ const songInclude = {
       attributes: ['id', 'stage_name'],
       include: [{ model: db.User, as: 'user', attributes: ['username'] }],
     },
-    { model: db.Album, as: 'album', attributes: ['id', 'title', 'cover_url'] },
+    { model: db.Album, as: 'album', attributes: ['id', 'public_id', 'title', 'cover_url'] },
   ],
 };
 
@@ -134,7 +130,7 @@ const createPlaylist = async ({ actor, title, description, isPublic }) => {
   return playlistRow(playlist, 0);
 };
 
-const listMyPlaylists = async ({ actor, page, limit }) => {
+const listMyPlaylists = async ({ actor, page, limit, songId }) => {
   const { safeLimit, safePage, offset } = paginate({ page, limit });
   const { count, rows } = await db.Playlist.findAndCountAll({
     where: { user_id: actor.id, deleted_at: null },
@@ -162,24 +158,30 @@ const listMyPlaylists = async ({ actor, page, limit }) => {
     return acc;
   }, {});
 
+  // Optional: which of these playlists already contain songId. One extra
+  // query, only run when the caller (the "Add to playlist" dialog) actually
+  // needs it — not a cost paid by every playlist listing.
+  let containsSet = null;
+  const sid = songId != null ? Number(songId) : null;
+  if (ids.length && Number.isInteger(sid) && sid > 0) {
+    const matches = await db.PlaylistSong.findAll({
+      attributes: ['playlist_id'],
+      where: { playlist_id: { [Op.in]: ids }, song_id: sid },
+      group: ['playlist_id'],
+      raw: true,
+    });
+    containsSet = new Set(matches.map((m) => m.playlist_id));
+  }
+
   return {
-    items: rows.map((p) => playlistRow(p, countMap[p.id] || 0)),
+    items: rows.map((p) => ({
+      ...playlistRow(p, countMap[p.id] || 0),
+      ...(containsSet ? { containsSong: containsSet.has(p.id) } : {}),
+    })),
     pagination: pageMeta(count, safePage, safeLimit),
   };
 };
 
-// Discovery: every PUBLIC playlist, from anyone, searchable by title.
-//
-// Distinct from listMyPlaylists in two ways that matter:
-//   - filters on is_public, not on user_id — this is how a playlist someone
-//     else made becomes findable at all (the whole point the "Public" toggle
-//     was promising and nothing delivered).
-//   - joins the owner so the list can say WHOSE playlist it is; a discovery
-//     surface with no author is anonymous and useless.
-//
-// Ownership is NOT required here — a public playlist stays discoverable even if
-// its owner is soft-deleted; publicProfile-style handling would hide the name,
-// but that's a later refinement, not a blocker.
 const listPublicPlaylists = async ({ actor, page, limit, search } = {}) => {
   const { safeLimit, safePage, offset } = paginate({ page, limit });
 
@@ -271,9 +273,6 @@ const updatePlaylist = async ({ actor, playlistId, title, description, isPublic 
 const deletePlaylist = async ({ actor, playlistId }) => {
   const playlist = await findWritable({ actor, playlistId });
 
-  // Soft delete, matching users. The playlist_songs rows are left alone — they
-  // are meaningless without their parent, and keeping them means an undelete is
-  // a single UPDATE rather than a reconstruction.
   playlist.deleted_at = new Date();
   await playlist.save();
 
@@ -307,11 +306,6 @@ const addTrack = async ({ actor, playlistId, songId, afterPlaylistSongId }) => {
   if (song.status !== 'published') {
     throw new ApiError(403, 'This song is not available');
   }
-
-  // NOTE: duplicates are ALLOWED. There is no unique index on
-  // (playlist_id, song_id) and that is deliberate — a playlist may legitimately
-  // contain the same song twice (a reprise, a DJ set, a joke). This is the
-  // opposite of likes/saves, where a duplicate is meaningless.
 
   let position;
   let needsRebalance = false;
