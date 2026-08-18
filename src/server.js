@@ -5,6 +5,7 @@ const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const errorHandler = require('./middlewares/errorHandler');
 const { apiLimiter } = require('./middlewares/rateLimiters');
+const { COVER_DIR, AVATAR_DIR } = require('./config/storage');
 const routes = require('./routes');
 const { startReleaseScheduler } = require('./jobs/releaseScheduler');
 const { startLyricsWorker } = require('./workers/lyricsWorker');
@@ -38,6 +39,8 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ limit: '1mb', extended: true }));
 
 app.use(cookieParser());
+app.use('/static/covers', express.static(COVER_DIR));
+app.use('/static/avatars', express.static(AVATAR_DIR));
 
 app.get('/', (req, res) => {
   res.json({ message: 'Audivo backend is running' });

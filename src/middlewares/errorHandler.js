@@ -1,5 +1,12 @@
+const multer = require('multer');
 const { error } = require('../utils/response');
 const errorHandler = (err, req, res, next) => {
+
+  if (err instanceof multer.MulterError) {
+    const message = err.code === 'LIMIT_FILE_SIZE' ? 'File is too large.' : err.message;
+    return error(res, 400, message);
+  }
+
   const statusCode = err.statusCode || 500;
 
   if (statusCode >= 500) {

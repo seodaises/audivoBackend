@@ -3,6 +3,7 @@ const authService = require('../services/authService');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
 const { setAuthCookie, clearAuthCookie } = require('../utils/authCookie');
+const ApiError = require('../utils/ApiError');
 
 const register = catchAsync(async (req, res) => {
   const { email, password, displayName, username, role } = req.body;
@@ -21,9 +22,6 @@ const login = catchAsync(async (req, res) => {
     userAgent: req.headers['user-agent'],
   });
 
-  // result is { token, user }. The token now goes into an httpOnly cookie
-  // instead of the JSON body, so client-side JS never sees it (XSS-safe).
-  // Only the user object is returned to the frontend.
   setAuthCookie(res, result.token);
   return success(res, 200, 'Login successful', { user: result.user });
 });
@@ -44,13 +42,10 @@ const resendVerification = catchAsync(async (req, res) => {
   const { email } = req.body;
 
   await authService.resendVerification({ email });
-  // Vague + always 200: never reveal whether the email exists or is verified.
   return success(res, 200, 'If that email needs verification, a new link has been sent', null);
 });
 
 const logout = catchAsync(async (req, res) => {
-  // Clear the httpOnly auth cookie. Options must match those used to set it
-  // (handled inside clearAuthCookie) or the browser won't remove it.
   clearAuthCookie(res);
   return success(res, 200, 'Logged out successfully', null);
 });
@@ -94,6 +89,13 @@ const updateMe = catchAsync(async (req, res) => {
   return success(res, 200, 'Profile updated', result);
 });
 
+// POST /api/auth/me/avatar  — multipart image upload (field name "avatar").
+const uploadAvatarImage = catchAsync(async (req, res) => {
+  if (!req.file) throw new ApiError(400, 'avatar image file is required');
+  const result = authService.buildAvatarImageUrl(req.file);
+  return success(res, 201, 'Avatar image uploaded', result);
+});
+
 // PATCH /api/auth/me/username — the logged-in user changes their handle.
 const changeUsername = catchAsync(async (req, res) => {
   const { username } = req.body;
@@ -108,8 +110,6 @@ const changeUsername = catchAsync(async (req, res) => {
 const deleteMe = catchAsync(async (req, res) => {
   const { password } = req.body;
   const result = await authService.deleteMe({ userId: req.user.id, password });
-  // The account is gone; clear the now-useless auth cookie so it doesn't
-  // linger in the browser until natural expiry.
   clearAuthCookie(res);
   return success(res, 200, 'Account deleted', result);
 });
@@ -126,6 +126,7 @@ module.exports = {
   resetPassword,
   getMe,
   updateMe,
+  uploadAvatarImage,
   changeUsername,
   deleteMe,
 };

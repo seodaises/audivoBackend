@@ -1,11 +1,11 @@
 'use strict';
 const db = require('../models');
 const ApiError = require('../utils/ApiError');
+const { publicImageUrl, deleteImageFile } = require('../config/storage');
 
 const profileRow = (p) => ({
   id: p.id,
   userId: p.user_id,
-  // attemp at patching bug myself: roleId: p.role_id,
   stageName: p.stage_name,
   bio: p.bio ?? null,
   avatarUrl: p.avatar_url ?? null,
@@ -48,6 +48,7 @@ const createProfile = async ({ actor, stageName, bio, avatarUrl }) => {
 
 const updateProfile = async ({ actor, stageName, bio, avatarUrl }) => {
   const profile = await requireOwnProfile(actor);
+  const previousAvatarUrl = profile.avatar_url; // captured BEFORE overwrite, for cleanup below
 
   if (stageName !== undefined) {
     const name = String(stageName).trim();
@@ -58,8 +59,18 @@ const updateProfile = async ({ actor, stageName, bio, avatarUrl }) => {
   if (avatarUrl !== undefined) profile.avatar_url = avatarUrl;
 
   await profile.save();
+
+  if (avatarUrl !== undefined && previousAvatarUrl && previousAvatarUrl !== profile.avatar_url) {
+    deleteImageFile(previousAvatarUrl);
+  }
+
   return profileRow(profile);
 };
+
+// POST /api/artist/profile/avatar 
+const buildAvatarImageUrl = (file) => ({
+  url: publicImageUrl('avatars', file.filename),
+});
 
 const getOwnProfile = async ({ actor }) => {
   const profile = await findProfileByUserId(actor.id);
@@ -193,4 +204,5 @@ module.exports = {
   findProfileByUserId,
   requireOwnProfile,
   profileRow,
+  buildAvatarImageUrl,
 };

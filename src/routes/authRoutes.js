@@ -5,16 +5,14 @@ const authController = require('../controllers/authController');
 const { protect } = require('../middlewares/authMiddleware');
 const noCache = require('../middlewares/noCache');
 const { authLimiter, emailLimiter } = require('../middlewares/rateLimiters');
+const { imageUploadLimiter } = require('../middlewares/rateLimiters');
+const { avatarUpload } = require('../config/storage');
 const validate = require('../middlewares/validate');
 const v = require('../validators/authValidators');
 
 // Auth responses are session-sensitive — never let the browser cache them
 // (a stale cached /auth/me returns 304 and can log a valid user out on refresh).
 router.use(noCache);
-
-// Middleware order per route: rateLimiter -> validate -> [protect] -> controller.
-// validate() sits AFTER the limiter (so malformed floods still count against the
-// limit) and BEFORE the controller (so the controller only ever sees clean input).
 
 // POST /api/auth/register  — create account, sends verification email
 router.post('/register', authLimiter, validate(v.register), authController.register);
@@ -45,6 +43,9 @@ router.get('/login-history', protect, authController.loginHistory);
 
 // GET /api/auth/me  — current user's full profile (server-trusted)
 router.get('/me', protect, authController.getMe);
+
+// POST /api/auth/me/avatar 
+router.post('/me/avatar', protect, imageUploadLimiter, avatarUpload.single('avatar'), authController.uploadAvatarImage);
 
 // PUT /api/auth/me  — update current user's profile fields
 router.put('/me', protect, validate(v.updateMe), authController.updateMe);

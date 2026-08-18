@@ -2,7 +2,7 @@
 const db = require('../models');
 const ApiError = require('../utils/ApiError');
 const { requireOwnProfile } = require('./artistProfileService');
-const { deleteAudioFile } = require('../config/storage');
+const { deleteAudioFile, publicImageUrl, deleteImageFile } = require('../config/storage');
 const { comparePassword } = require('../utils/password');
 const notificationService = require('./notificationService');
 const { isWithinPrereleaseWindow } = require('./schedulerService');
@@ -55,6 +55,7 @@ const createAlbum = async ({ actor, title, coverUrl, description, releaseDate, i
 
 const updateAlbum = async ({ actor, albumId, title, coverUrl, description, releaseDate }) => {
   const { album } = await loadOwnedAlbum(actor, albumId);
+  const previousCoverUrl = album.cover_url;
 
   if (title !== undefined) {
     const t = String(title).trim();
@@ -66,8 +67,17 @@ const updateAlbum = async ({ actor, albumId, title, coverUrl, description, relea
   if (releaseDate !== undefined) album.release_date = releaseDate;
 
   await album.save();
+  if (coverUrl !== undefined && previousCoverUrl && previousCoverUrl !== album.cover_url) {
+    deleteImageFile(previousCoverUrl);
+  }
+
   return albumRow(album);
 };
+
+// POST /api/albums/cover-image 
+const buildCoverImageUrl = (file) => ({
+  url: publicImageUrl('covers', file.filename),
+});
 
 const setStatus = async ({ actor, albumId, status }) => {
   if (!VALID_STATUSES.includes(status)) {
@@ -264,4 +274,4 @@ const getAlbumById = async ({ actor, albumId }) => {
   };
 };
 
-module.exports = {createAlbum, updateAlbum, setStatus, scheduleRelease, cancelSchedule, deleteAlbum, getAlbumById, albumRow, loadOwnedAlbum,};
+module.exports = {createAlbum, updateAlbum, setStatus, scheduleRelease, cancelSchedule, deleteAlbum, getAlbumById, albumRow, loadOwnedAlbum, buildCoverImageUrl,};

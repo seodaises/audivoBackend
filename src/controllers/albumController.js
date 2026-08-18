@@ -2,6 +2,7 @@
 const albumService = require('../services/albumService');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
+const ApiError = require('../utils/ApiError');
 
 // POST /api/albums  — create an album owned by the caller's artist profile.
 const createAlbum = catchAsync(async (req, res) => {
@@ -16,6 +17,13 @@ const createAlbum = catchAsync(async (req, res) => {
     isSingle,
   });
   return success(res, 201, 'Album created', result);
+});
+
+// POST /api/albums/cover-image  — multipart image upload (field name "cover").
+const uploadCoverImage = catchAsync(async (req, res) => {
+  if (!req.file) throw new ApiError(400, 'cover image file is required');
+  const result = albumService.buildCoverImageUrl(req.file);
+  return success(res, 201, 'Cover image uploaded', result);
 });
 
 // PATCH /api/albums/:id  — edit album fields (ownership enforced in service).
@@ -94,6 +102,7 @@ const deleteAlbum = catchAsync(async (req, res) => {
 
 module.exports = {
   createAlbum,
+  uploadCoverImage,
   updateAlbum,
   updateStatus,
   scheduleRelease,
