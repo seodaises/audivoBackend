@@ -3,29 +3,24 @@ const express = require('express');
 const router = express.Router();
 const playlistController = require('../controllers/playlistController');
 const { protect } = require('../middlewares/authMiddleware');
+const validate = require('../middlewares/validate');
+const v = require('../validators/playlistValidators');
 
 router.use(protect);
 
-router.post('/', playlistController.createPlaylist);
-router.get('/', playlistController.listMyPlaylists);
+router.post('/', validate(v.createPlaylist), playlistController.createPlaylist);
+router.get('/', validate(v.listMyPlaylists), playlistController.listMyPlaylists);
 
-// MUST be declared before '/:id'. Express matches top-down, so if '/:id' came
-// first it would swallow the literal '/public' as an id and blow up on
-// toId('public'). Same lesson the comments router documents for '/hidden'.
-router.get('/public', playlistController.listPublicPlaylists);
+// MUST be declared before '/:id' (Express matches top-down).
+router.get('/public', validate(v.listPublicPlaylists), playlistController.listPublicPlaylists);
 
-// Read is allowed if the playlist is yours OR public.
-// Write is allowed only if it's yours. Public ≠ editable.
-router.get('/:id', playlistController.getPlaylist);
-router.patch('/:id', playlistController.updatePlaylist);
-router.delete('/:id', playlistController.deletePlaylist);
+router.get('/:id', validate(v.getPlaylist), playlistController.getPlaylist);
+router.patch('/:id', validate(v.updatePlaylist), playlistController.updatePlaylist);
+router.delete('/:id', validate(v.deletePlaylist), playlistController.deletePlaylist);
 
 // ── Tracks ───────────────────────────────────────────────────────────────────
-// :trackId throughout is the playlist_songs row id, NOT the song id. A playlist
-// may contain the same song more than once (a reprise, a DJ set), so the song id
-// alone is ambiguous — it cannot tell you WHICH copy you meant.
-router.post('/:id/tracks', playlistController.addTrack);
-router.delete('/:id/tracks/:trackId', playlistController.removeTrack);
-router.patch('/:id/tracks/:trackId/move', playlistController.moveTrack);
+router.post('/:id/tracks', validate(v.addTrack), playlistController.addTrack);
+router.delete('/:id/tracks/:trackId', validate(v.removeTrack), playlistController.removeTrack);
+router.patch('/:id/tracks/:trackId/move', validate(v.moveTrack), playlistController.moveTrack);
 
 module.exports = router;

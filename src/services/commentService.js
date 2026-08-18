@@ -2,6 +2,7 @@
 const db = require('../models');
 const ApiError = require('../utils/ApiError');
 const { publicProfile } = require('../serializers/publicProfile');
+const notificationService = require('./notificationService');
 const { Op } = db.Sequelize;
 
 const MAX_BODY = 2000;
@@ -218,6 +219,21 @@ const createComment = async ({ actor, songId, body, parentCommentId }) => {
     status: 'visible',
   });
 
+  if (replyToId) {
+    await notificationService.emitCommentReply({
+      parentCommentId: replyToId,
+      replyId: comment.id,
+      songId: sid,
+      actorUserId: actor.id,
+    });
+  } else {
+    await notificationService.emitComment({
+      songId: sid,
+      commentId: comment.id,
+      actorUserId: actor.id,
+    });
+  }
+
   const withAuthor = await db.Comment.findByPk(comment.id, { include: [authorInclude] });
   return commentRow(withAuthor);
 };
@@ -315,7 +331,7 @@ const getMyComments = async ({ actor, page = 1, limit = 30 }) => {
 
   const { rows, count } = await db.Comment.findAndCountAll({
     where: { user_id: actor.id, deleted_at: null },
-    include: [{ model: db.Song, as: 'song', attributes: ['id', 'title', 'album_id'] }],
+    include: [{ model: db.Song, as: 'song', attributes: ['id', 'title', 'public_id', 'album_id'] }],
     order: [['created_at', 'DESC']],
     limit: lim,
     offset: (p - 1) * lim,
@@ -327,7 +343,9 @@ const getMyComments = async ({ actor, page = 1, limit = 30 }) => {
     body: c.status === 'hidden' ? '[removed by moderator]' : c.body,
     isHidden: c.status === 'hidden',
     createdAt: c.created_at,
-    song: c.song ? { id: c.song.id, title: c.song.title, albumId: c.song.album_id } : null,
+    song: c.song
+      ? { id: c.song.id, publicId: c.song.public_id, title: c.song.title, albumId: c.song.album_id }
+      : null,
   }));
 
   return { items, total: count, page: p, limit: lim };

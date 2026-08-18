@@ -2,12 +2,10 @@
 const albumService = require('../services/albumService');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
-const ApiError = require('../utils/ApiError');
 
 // POST /api/albums  — create an album owned by the caller's artist profile.
 const createAlbum = catchAsync(async (req, res) => {
-  const { title, coverUrl, description, releaseDate, isSingle } = req.body || {};
-  if (!title) throw new ApiError(400, 'title is required');
+  const { title, coverUrl, description, releaseDate, isSingle } = req.body;
 
   const result = await albumService.createAlbum({
     actor: req.user,
@@ -23,7 +21,7 @@ const createAlbum = catchAsync(async (req, res) => {
 // PATCH /api/albums/:id  — edit album fields (ownership enforced in service).
 const updateAlbum = catchAsync(async (req, res) => {
   const albumId = req.params.id;
-  const { title, coverUrl, description, releaseDate } = req.body || {};
+  const { title, coverUrl, description, releaseDate } = req.body;
   const result = await albumService.updateAlbum({
     actor: req.user,
     albumId,
@@ -38,8 +36,7 @@ const updateAlbum = catchAsync(async (req, res) => {
 // PATCH /api/albums/:id/status  — move draft -> published -> archived.
 const updateStatus = catchAsync(async (req, res) => {
   const albumId = req.params.id;
-  const { status } = req.body || {};
-  if (!status) throw new ApiError(400, 'status is required');
+  const { status } = req.body;
 
   const result = await albumService.setStatus({
     actor: req.user,
@@ -53,8 +50,7 @@ const updateStatus = catchAsync(async (req, res) => {
 // release_at. The cron worker publishes it when that time arrives.
 const scheduleRelease = catchAsync(async (req, res) => {
   const albumId = req.params.id;
-  const { releaseAt } = req.body || {};
-  if (!releaseAt) throw new ApiError(400, 'releaseAt is required');
+  const { releaseAt } = req.body;
 
   const result = await albumService.scheduleRelease({
     actor: req.user,
@@ -91,7 +87,7 @@ const deleteAlbum = catchAsync(async (req, res) => {
   const result = await albumService.deleteAlbum({
     actor: req.user,
     albumId: req.params.id,
-    password: req.body?.password,
+    password: req.body.password,
   });
   return success(res, 200, 'Album deleted', result);
 });

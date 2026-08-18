@@ -3,9 +3,6 @@ const trendingService = require('../services/trendingService');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
 
-// Controllers stay thin on purpose: read the request, call the service, shape
-// the response. All ranking and filtering logic lives in trendingService.
-
 // GET /api/catalog/trending/songs?limit=
 const trendingSongs = catchAsync(async (req, res) => {
   const result = await trendingService.trendingSongs({ limit: req.query.limit });

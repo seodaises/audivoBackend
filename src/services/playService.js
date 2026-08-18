@@ -78,7 +78,7 @@ const historySongRow = (song) => ({
   playCount: song.play_count,
   coverUrl: song.album ? (song.album.cover_url ?? null) : null,
   album: song.album ? { id: song.album.id, title: song.album.title } : null,
-  artistProfile: song.artistProfile
+  artist: song.artistProfile
     ? { id: song.artistProfile.id, stageName: song.artistProfile.stage_name }
     : null,
 });

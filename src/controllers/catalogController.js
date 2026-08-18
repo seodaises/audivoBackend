@@ -10,10 +10,10 @@ const browseSongs = catchAsync(async (req, res) => {
   return success(res, 200, 'Songs retrieved', result);
 });
 
-// GET /api/catalog/albums?page=&limit=  — published albums only.
+// GET /api/catalog/albums?page=&limit=&genre=  — published albums only.
 const browseAlbums = catchAsync(async (req, res) => {
-  const { page, limit } = req.query;
-  const result = await catalogService.browseAlbums({ page, limit });
+  const { page, limit, genre } = req.query;
+  const result = await catalogService.browseAlbums({ page, limit, genre });
   return success(res, 200, 'Albums retrieved', result);
 });
 
@@ -31,9 +31,18 @@ const search = catchAsync(async (req, res) => {
   return success(res, 200, 'Search results retrieved', result);
 });
 
+// GET /api/catalog/songs/:publicId — one published song by its public_id.
+// Backs the /play/:publicId share route and the focused player.
+const getSong = catchAsync(async (req, res) => {
+  const { publicId } = req.params;
+  const result = await catalogService.getSongByPublicId({ actor: req.user, publicId });
+  return success(res, 200, 'Song retrieved', result);
+});
+
 module.exports = {
   browseSongs,
   browseAlbums,
   browseArtists,
   search,
+  getSong,
 };

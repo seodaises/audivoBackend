@@ -89,19 +89,6 @@ const listAdmins = async ({ page = 1, limit = 50, search } = {}) => {
   return paginatedUserList({ page, limit, roleWhere, search });
 };
 
-const findByUsername = async ({ username }) => {
-  const handle = String(username || '').trim().toLowerCase();
-  if (!handle) throw new ApiError(400, 'username is required');
-
-  const user = await db.User.findOne({
-    where: { username: handle },
-    include: [{ model: db.Role, as: 'role' }],
-  });
-  if (!user) throw new ApiError(404, 'No user found with that username');
-
-  return adminUserRow(user);
-};
-
 const changeUserRole = async ({ actor, targetUserId, newRoleName }) => {
   // Guardrail 1: no changing your own role.
   if (Number(actor.id) === Number(targetUserId)) {
@@ -658,7 +645,6 @@ const getMetrics = async ({ actorLevel }) => {
 module.exports = {
   listUsers,
   listAdmins,
-  findByUsername,
   changeUserRole,
   createUser,
   setUserStatus,

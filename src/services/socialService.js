@@ -49,16 +49,18 @@ const songInclude = [
     attributes: ['id', 'stage_name'],
     include: [{ model: db.User, as: 'user', attributes: ['username'] }],
   },
-  { model: db.Album, as: 'album', attributes: ['id', 'title', 'cover_url'] },
+   { model: db.Album, as: 'album', attributes: ['id', 'public_id', 'title', 'cover_url'] },
 ];
 
 const songRow = (s) => ({
   id: s.id,
+  publicId: s.public_id,
   title: s.title,
   playCount: s.play_count ?? 0,
   durationSeconds: s.duration_seconds ?? null,
+  albumPublicId: s.album ? s.album.public_id : null,
   album: s.album
-    ? { id: s.album.id, title: s.album.title, coverUrl: s.album.cover_url ?? null }
+    ? { id: s.album.id, publicId: s.album.public_id, title: s.album.title, coverUrl: s.album.cover_url ?? null }
     : null,
   artist: s.artistProfile
     ? {
@@ -71,6 +73,7 @@ const songRow = (s) => ({
 
 const albumRow = (a) => ({
   id: a.id,
+  publicId: a.public_id,
   title: a.title,
   coverUrl: a.cover_url ?? null,
   isSingle: a.is_single,
@@ -203,16 +206,10 @@ const followArtist = async ({ actor, artistProfileId }) => {
   });
   if (!artist) throw new ApiError(404, 'Artist not found');
 
-  // An artist profile has no status column — its owner is the thing that can
-  // disappear. A soft-deleted user's profile must not be followable, or you'd
-  // be accruing followers for an account that no longer exists.
   if (!artist.user || artist.user.deleted_at !== null) {
     throw new ApiError(404, 'Artist not found');
   }
 
-  // Following yourself inflates your own follower count. It's the one number an
-  // artist is most tempted to game, so we close it here rather than trusting
-  // the UI to hide the button.
   if (artist.user.id === actor.id) {
     throw new ApiError(400, 'You cannot follow yourself');
   }
@@ -306,9 +303,6 @@ const listMyFollowers = async ({ actor, page, limit }) => {
 };
 
 // ── Status (does the current user like/save/follow this?) ────────────────────
-//
-// One endpoint, not three round trips. A song page needs "is it liked AND is it
-// saved" to paint its buttons; asking twice doubles the latency for no reason.
 
 const getSongStatus = async ({ actor, songId }) => {
   const id = toId(songId, 'song');

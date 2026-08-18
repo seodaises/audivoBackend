@@ -4,11 +4,14 @@ const ApiError = require('../utils/ApiError');
 const { requireOwnProfile } = require('./artistProfileService');
 const { deleteAudioFile } = require('../config/storage');
 const { comparePassword } = require('../utils/password');
+const notificationService = require('./notificationService');
+const { isWithinPrereleaseWindow } = require('./schedulerService');
 
 const VALID_STATUSES = ['draft', 'published', 'archived'];
 
 const albumRow = (a) => ({
   id: a.id,
+  publicId: a.public_id,
   artistProfileId: a.artist_profile_id,
   title: a.title,
   coverUrl: a.cover_url ?? null,
@@ -78,6 +81,7 @@ const setStatus = async ({ actor, albumId, status }) => {
       'This album was removed by a moderator and cannot be changed. Contact an admin to appeal.'
     );
   }
+  const becomingPublished = status === 'published' && album.status !== 'published';
 
   await db.sequelize.transaction(async (t) => {
     album.status = status;
@@ -109,6 +113,13 @@ const setStatus = async ({ actor, albumId, status }) => {
     }
   });
 
+  if (becomingPublished) {
+    await notificationService.emitRelease({
+      artistProfileId: album.artist_profile_id,
+      albumId: album.id,
+    });
+  }
+
   return albumRow(album);
 };
 
@@ -135,7 +146,19 @@ const scheduleRelease = async ({ actor, albumId, releaseAt }) => {
 
   album.status = 'scheduled';
   album.release_at = when;
+  album.prerelease_notified_at = null;
+
+  const fireHeadsUpNow = isWithinPrereleaseWindow(when);
+  if (fireHeadsUpNow) album.prerelease_notified_at = new Date();
+
   await album.save();
+
+  if (fireHeadsUpNow) {
+    await notificationService.emitUpcomingRelease({
+      artistProfileId: album.artist_profile_id,
+      albumId: album.id,
+    });
+  }
 
   return albumRow(album);
 };
@@ -149,6 +172,7 @@ const cancelSchedule = async ({ actor, albumId }) => {
 
   album.status = 'draft';
   album.release_at = null;
+  album.prerelease_notified_at = null;
   await album.save();
 
   return albumRow(album);
@@ -184,18 +208,22 @@ const deleteAlbum = async ({ actor, albumId, password }) => {
   return { id: Number(albumId), deleted: true, songsDeleted: songIds.length };
 };
 
+const isNumericRef = (v) => /^\d+$/.test(String(v));
+
 const getAlbumById = async ({ actor, albumId }) => {
-  const album = await db.Album.findByPk(albumId, {
-    include: [
-      { model: db.Song, as: 'songs' },
-      {
-        model: db.ArtistProfile,
-        as: 'artistProfile',
-        attributes: ['id', 'stage_name'],
-        include: [{ model: db.User, as: 'user', attributes: ['username'] }],
-      },
-    ],
-  });
+  const include = [
+    { model: db.Song, as: 'songs' },
+    {
+      model: db.ArtistProfile,
+      as: 'artistProfile',
+      attributes: ['id', 'stage_name'],
+      include: [{ model: db.User, as: 'user', attributes: ['username'] }],
+    },
+  ];
+
+  const album = isNumericRef(albumId)
+    ? await db.Album.findByPk(albumId, { include })
+    : await db.Album.findOne({ where: { public_id: albumId }, include });
   if (!album) throw new ApiError(404, 'Album not found');
 
   let isOwner = false;
@@ -226,7 +254,8 @@ const getAlbumById = async ({ actor, albumId }) => {
     songs: songs
       .sort((a, b) => (a.track_number ?? 0) - (b.track_number ?? 0))
       .map((s) => ({
-        id: s.id, title: s.title, trackNumber: s.track_number ?? null,
+        id: s.id, publicId: s.public_id,
+        title: s.title, trackNumber: s.track_number ?? null,
         durationSeconds: s.duration_seconds ?? null, status: s.status,
         archivedBy: s.archived_by ?? null,
         isLocked: s.status === 'archived' && s.archived_by === 'admin',

@@ -18,7 +18,7 @@ const listForSong = catchAsync(async (req, res) => {
 // POST /api/songs/:id/comments
 // body: { body, parentCommentId? }
 const createComment = catchAsync(async (req, res) => {
-  const { body, parentCommentId } = req.body || {};
+  const { body, parentCommentId } = req.body;
   const result = await commentService.createComment({
     actor: req.user,
     songId: req.params.id,
@@ -41,7 +41,7 @@ const deleteComment = catchAsync(async (req, res) => {
 
 // PATCH /api/comments/:id/status  body: { status: 'visible' | 'hidden' }
 const setCommentStatus = catchAsync(async (req, res) => {
-  const { status } = req.body || {};
+  const { status } = req.body;
   const result = await commentService.setCommentStatus({
     actor: req.user,
     commentId: req.params.id,

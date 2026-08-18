@@ -81,7 +81,7 @@ const getMyCatalog = async ({ actor }) => {
   const songs = await db.Song.findAll({
     where: { artist_profile_id: profile.id },
     include: [
-      { model: db.Album, as: 'album', attributes: ['id', 'title', 'cover_url'] },
+      { model: db.Album, as: 'album', attributes: ['id', 'public_id', 'title', 'cover_url'] },
       { model: db.Genre, as: 'genres', attributes: ['id', 'name'], through: { attributes: [] } },
     ],
     order: [['id', 'DESC']],
@@ -108,17 +108,20 @@ const getMyCatalog = async ({ actor }) => {
     isArtist: true,
     profile: profileRow(profile),
     albums: albums.map((a) => ({
-      id: a.id, title: a.title, coverUrl: a.cover_url ?? null,
+      id: a.id, publicId: a.public_id, title: a.title, coverUrl: a.cover_url ?? null,
       status: a.status, isSingle: a.is_single, releaseDate: a.release_date ?? null,
       releaseAt: a.release_at ?? null,
+      archivedBy: a.archived_by ?? null, isLocked: a.status === 'archived' && a.archived_by === 'admin',
     })),
     songs: songs.map((s) => ({
-      id: s.id, title: s.title, albumId: s.album_id, status: s.status,
+      id: s.id, publicId: s.public_id, title: s.title,
+      albumId: s.album_id, albumPublicId: s.album ? s.album.public_id : null,
+      status: s.status,
       archivedBy: s.archived_by ?? null, isLocked: s.status === 'archived' && s.archived_by === 'admin',
       playCount: s.play_count ?? 0,
       likeCount: likeCounts.get(s.id) ?? 0,
       trackNumber: s.track_number ?? null, durationSeconds: s.duration_seconds ?? null,
-      album: s.album ? { id: s.album.id, title: s.album.title } : null,
+      album: s.album ? { id: s.album.id, publicId: s.album.public_id, title: s.album.title } : null,
       coverUrl: s.album ? (s.album.cover_url ?? null) : null,
       artist: { id: profile.id, stageName: profile.stage_name },
       genres: (s.genres || []).map((g) => ({ id: g.id, name: g.name })),
@@ -151,28 +154,34 @@ const getPublicProfile = async ({ username }) => {
   const profile = await db.ArtistProfile.findOne({ where: { user_id: user.id } });
   if (!profile) throw new ApiError(404, 'This user is not an artist');
 
+  const PUBLIC_DISCOGRAPHY_CAP = 100;
+
   const albums = await db.Album.findAll({
     where: { artist_profile_id: profile.id, status: 'published' },
     order: [['release_date', 'DESC'], ['id', 'DESC']],
+    limit: PUBLIC_DISCOGRAPHY_CAP,
   });
   const songs = await db.Song.findAll({
     where: { artist_profile_id: profile.id, status: 'published' },
+    include: [{ model: db.Album, as: 'album', attributes: ['id', 'public_id'] }],
     order: [['id', 'DESC']],
+    limit: PUBLIC_DISCOGRAPHY_CAP,
   });
 
   return {
     profile: profileRow(profile),
     username: user.username,
     albums: albums.map((a) => ({
-      id: a.id, title: a.title, coverUrl: a.cover_url ?? null,
+      id: a.id, publicId: a.public_id, title: a.title, coverUrl: a.cover_url ?? null,
       releaseDate: a.release_date ?? null, isSingle: a.is_single,
     })),
     songs: songs.map((s) => ({
-      id: s.id, title: s.title, albumId: s.album_id,
+      id: s.id, publicId: s.public_id, title: s.title,
+      albumId: s.album_id, albumPublicId: s.album ? s.album.public_id : null,
       trackNumber: s.track_number ?? null, durationSeconds: s.duration_seconds ?? null,
     })),
+  }
   };
-};
 
 module.exports = {
   createProfile,

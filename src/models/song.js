@@ -27,11 +27,21 @@ module.exports = (sequelize, DataTypes) => {
       Song.hasMany(models.PlayHistory, { foreignKey: 'song_id', as: 'plays' });
       Song.hasMany(models.Comment, { foreignKey: 'song_id', as: 'comments' });
       Song.hasMany(models.PlaylistSong, { foreignKey: 'song_id', as: 'playlistEntries' });
+      Song.hasOne(models.SongLyrics, { foreignKey: 'song_id', as: 'lyrics' });
     }
   }
 
   Song.init(
     {
+      // Opaque, external-facing handle — the id used in the song's own share
+      // link and the /play/:publicId player route. Same reasoning as Album:
+      // the integer PK is an internal join key and never appears on the wire.
+      public_id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        allowNull: false,
+        unique: true,
+      },
       album_id: {
         type: DataTypes.INTEGER,
         allowNull: false, // every song belongs to an album
@@ -61,17 +71,6 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         defaultValue: 'draft',
       },
-      // WHO archived this song. NULL unless status === 'archived'.
-      //
-      //   'artist' -> the artist pulled it themselves; they can republish freely.
-      //   'admin'  -> a moderation takedown. LOCKED to the artist: the publish
-      //               endpoint refuses, and only an admin can lift it. Without
-      //               this, an artist could undo any takedown with one click,
-      //               which would make moderation decorative.
-      //   'album'  -> collateral damage from an album archive. This is the value
-      //               that lets an album republish restore ONLY what the album
-      //               took down, instead of also resurrecting a B-side the artist
-      //               deliberately pulled.
       archived_by: {
         type: DataTypes.ENUM('artist', 'admin', 'album'),
         allowNull: true,

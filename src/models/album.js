@@ -15,6 +15,12 @@ module.exports = (sequelize, DataTypes) => {
 
   Album.init(
     {
+      public_id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        allowNull: false,
+        unique: true,
+      },
       artist_profile_id: {
         type: DataTypes.INTEGER,
         allowNull: false,
@@ -56,6 +62,11 @@ module.exports = (sequelize, DataTypes) => {
       release_at: {
         type: DataTypes.DATE,
         allowNull: true, // UTC trigger instant for a scheduled release; NULL otherwise
+      },
+      prerelease_notified_at: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        defaultValue: null,
       },
       is_single: {
         type: DataTypes.BOOLEAN,

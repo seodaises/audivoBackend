@@ -1,7 +1,7 @@
 'use strict';
 
 const cron = require('node-cron');
-const { runDueReleases } = require('../services/schedulerService');
+const { runDueReleases, runDuePrereleases } = require('../services/schedulerService');
 let running = false;
 
 const startReleaseScheduler = () => {
@@ -10,6 +10,7 @@ const startReleaseScheduler = () => {
     running = true;
     try {
       await runDueReleases();
+      await runDuePrereleases();
     } catch (err) {
       console.error('[scheduler] tick failed:', err.message);
     } finally {

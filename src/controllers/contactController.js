@@ -7,7 +7,7 @@ const { success } = require('../utils/response');
 // reactivation path for Listeners/Artists deactivated after 30 days of
 // inactivity, but open to anyone.
 const submit = catchAsync(async (req, res) => {
-  const { name, email, subject, message } = req.body || {};
+  const { name, email, subject, message } = req.body;
   const result = await contactService.submitContact({ name, email, subject, message });
   return success(res, 201, 'Thanks — your message has been received', result);
 });
