@@ -18,6 +18,12 @@ const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 const INACTIVITY_ROLES = ['Listener', 'Artist'];
 const INACTIVITY_LIMIT_DAYS = 30;
 
+const parsedEmailTokenHours = Number(process.env.EMAIL_TOKEN_EXPIRES_HOURS);
+const EMAIL_TOKEN_EXPIRES_HOURS =
+  Number.isFinite(parsedEmailTokenHours) && parsedEmailTokenHours > 0
+    ? parsedEmailTokenHours
+    : 24;
+
 const register = async ({ email, password, displayName, username, role = 'Listener' }) => {
   const existing = await db.User.findOne({ where: { email } });
   if (existing) throw new ApiError(409, 'Email already registered');
@@ -51,7 +57,7 @@ const register = async ({ email, password, displayName, username, role = 'Listen
 
   const token = generateVerificationToken();
   await db.EmailVerificationToken.create({
-    user_id: user.id, token, expires_at: expiryFromNow(24),
+    user_id: user.id, token, expires_at: expiryFromNow(EMAIL_TOKEN_EXPIRES_HOURS),
   });
 
   const emailDelivery = await sendVerificationEmail({ to: user.email, token });
@@ -157,7 +163,7 @@ const resendVerification = async ({ email }) => {
   await db.EmailVerificationToken.create({
     user_id: user.id,
     token,
-    expires_at: expiryFromNow(24),
+    expires_at: expiryFromNow(EMAIL_TOKEN_EXPIRES_HOURS),
   });
 
   const emailDelivery = await sendVerificationEmail({ to: user.email, token });

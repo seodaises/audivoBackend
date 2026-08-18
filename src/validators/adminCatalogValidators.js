@@ -2,16 +2,11 @@
 const Joi = require('joi');
 const { idParam, pagination } = require('./commonValidators');
 
-// Admin catalog: status enum is draft|published|archived (adminCatalogService
-// .VALID_STATUSES) — same three as the artist side; no 'scheduled' here.
 const status = Joi.string().valid('draft', 'published', 'archived').messages({
   'any.only': 'status must be one of: draft, published, archived',
   'any.required': 'status is required',
 });
 
-// List filters share page/limit/search, plus an optional status filter that,
-// if present, must be a real status (the service ignores invalid ones, but a
-// clean 400 is friendlier than a silently-ignored filter).
 const listFilter = {
   query: pagination.keys({
     status: status.optional(),
@@ -33,6 +28,18 @@ const listAllArtists = {
 const setSongStatus = { params: idParam, body: Joi.object({ status: status.required() }) };
 const setAlbumStatus = { params: idParam, body: Joi.object({ status: status.required() }) };
 
+// PATCH /admin/catalog/songs/bulk-status  &  albums/bulk-status
+const bulkIds = Joi.array().items(Joi.number().integer().positive()).min(1).messages({
+  'array.min': 'ids must contain at least one id',
+  'array.base': 'ids must be an array of song/album ids',
+});
+const bulkSetSongStatus = {
+  body: Joi.object({ ids: bulkIds.required(), status: status.required() }),
+};
+const bulkSetAlbumStatus = {
+  body: Joi.object({ ids: bulkIds.required(), status: status.required() }),
+};
+
 // PATCH /admin/catalog/artists/:id/verify — isVerified optional (defaults true).
 const verifyArtist = {
   params: idParam,
@@ -53,6 +60,8 @@ module.exports = {
   listAllArtists,
   setSongStatus,
   setAlbumStatus,
+  bulkSetSongStatus,
+  bulkSetAlbumStatus,
   verifyArtist,
   deleteSong,
   deleteAlbum,

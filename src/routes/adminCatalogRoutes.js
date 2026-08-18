@@ -14,6 +14,8 @@ const gate = [protect, requireMinLevel(ADMIN), requirePermission('manage_catalog
 router.get('/songs', ...gate, validate(v.listAllSongs), adminCatalogController.listAllSongs);
 router.get('/albums', ...gate, validate(v.listAllAlbums), adminCatalogController.listAllAlbums);
 router.get('/artists', ...gate, validate(v.listAllArtists), adminCatalogController.listAllArtists);
+router.patch('/songs/bulk-status', ...gate, validate(v.bulkSetSongStatus), adminCatalogController.adminBulkSetSongStatus);
+router.patch('/albums/bulk-status', ...gate, validate(v.bulkSetAlbumStatus), adminCatalogController.adminBulkSetAlbumStatus);
 router.patch('/songs/:id/status', ...gate, validate(v.setSongStatus), adminCatalogController.adminSetSongStatus);
 router.patch('/albums/:id/status', ...gate, validate(v.setAlbumStatus), adminCatalogController.adminSetAlbumStatus);
 router.patch('/artists/:id/verify', ...gate, validate(v.verifyArtist), adminCatalogController.adminVerifyArtist);
