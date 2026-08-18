@@ -7,6 +7,8 @@ const { protect } = require('../middlewares/authMiddleware');
 const { requireRole } = require('../middlewares/requireRole');
 const { requirePermission } = require('../middlewares/requirePermission');
 const noCache = require('../middlewares/noCache');
+const { avatarUpload } = require('../config/storage');
+const { imageUploadLimiter } = require('../middlewares/rateLimiters');
 const validate = require('../middlewares/validate');
 const v = require('../validators/artistValidators');
 
@@ -15,8 +17,10 @@ router.use(noCache);
 // Creating an artist profile is gated to the Artist role EXACTLY.
 router.post('/profile', protect, requireRole('Artist'), validate(v.createMyProfile), artistProfileController.createMyProfile);
 
-// Editing / reading your own profile stays open to any authenticated user who
-// actually HAS a profile — the service throws 403/404 if they don't.
+// POST /api/artist/profile/avatar 
+router.post('/profile/avatar', protect, imageUploadLimiter, avatarUpload.single('avatar'), artistProfileController.uploadAvatarImage);
+
+// Editing / reading your own profile stays open to any authenticated user
 router.patch('/profile', protect, validate(v.updateMyProfile), artistProfileController.updateMyProfile);
 router.get('/profile', protect, artistProfileController.getMyProfile);
 

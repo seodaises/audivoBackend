@@ -2,6 +2,7 @@
 const artistProfileService = require('../services/artistProfileService');
 const catchAsync = require('../utils/catchAsync');
 const { success } = require('../utils/response');
+const ApiError = require('../utils/ApiError');
 
 // POST /api/artist/profile  — the logged-in user establishes their artist presence. Verified-artist gate + "one profile per user" rule live in the service.
 const createMyProfile = catchAsync(async (req, res) => {
@@ -14,6 +15,13 @@ const createMyProfile = catchAsync(async (req, res) => {
     avatarUrl,
   });
   return success(res, 201, 'Artist profile created', result);
+});
+
+// POST /api/artist/profile/avatar  — multipart image upload (field name "avatar").
+const uploadAvatarImage = catchAsync(async (req, res) => {
+  if (!req.file) throw new ApiError(400, 'avatar image file is required');
+  const result = artistProfileService.buildAvatarImageUrl(req.file);
+  return success(res, 201, 'Avatar image uploaded', result);
 });
 
 // PATCH /api/artist/profile  — edit own profile fields.
@@ -49,6 +57,7 @@ const getPublicProfile = catchAsync(async (req, res) => {
 
 module.exports = {
   createMyProfile,
+  uploadAvatarImage,
   updateMyProfile,
   getMyProfile,
   getMyCatalog,

@@ -47,13 +47,24 @@ const uploadLimiter = rateLimit({
     error(res, 429, 'Upload limit reached. Please try again later.'),
 });
 
+const imageUploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: keyByUser,
+  validate: authedValidate,
+  handler: (req, res) =>
+    error(res, 429, 'Image upload limit reached. Please try again later.'),
+});
+
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000,                // generous floor — normal use never approaches this
+  max: 1000,               
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) =>
     error(res, 429, 'Too many requests. Please slow down and try again shortly.'),
 });
 
-module.exports = { apiLimiter, authLimiter, emailLimiter, socialLimiter, uploadLimiter };
+module.exports = { apiLimiter, authLimiter, emailLimiter, socialLimiter, uploadLimiter, imageUploadLimiter };

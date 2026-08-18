@@ -3,10 +3,14 @@ const express = require('express');
 const router = express.Router();
 const albumController = require('../controllers/albumController');
 const { protect } = require('../middlewares/authMiddleware');
+const { requireRole } = require('../middlewares/requireRole');
+const { coverUpload } = require('../config/storage');
+const { imageUploadLimiter } = require('../middlewares/rateLimiters');
 const validate = require('../middlewares/validate');
 const v = require('../validators/albumValidators');
 
 router.post('/', protect, validate(v.createAlbum), albumController.createAlbum);
+router.post('/cover-image', protect, requireRole('Artist'), imageUploadLimiter, coverUpload.single('cover'), albumController.uploadCoverImage);
 router.patch('/:id', protect, validate(v.updateAlbum), albumController.updateAlbum);
 router.patch('/:id/status', protect, validate(v.updateStatus), albumController.updateStatus);
 router.patch('/:id/schedule', protect, validate(v.scheduleRelease), albumController.scheduleRelease);

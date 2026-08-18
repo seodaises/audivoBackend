@@ -6,6 +6,7 @@ const { hashPassword, comparePassword } = require('../utils/password');
 const { generateToken } = require('../utils/jwt');
 const { sendVerificationEmail, sendResetPasswordEmail } = require('./emailService');
 const { cascadeUserSoftDelete } = require('./userCascade');
+const { publicImageUrl, deleteImageFile } = require('../config/storage');
 const {
   generateVerificationToken,
   expiryFromNow,
@@ -76,7 +77,6 @@ const login = async ({ email, password, ipAddress, userAgent }) => {
 
   if (user.deleted_at !== null) throw new ApiError(401, 'Invalid credentials');
 
-  // --- Lazy inactivity sweep -------------------------------------------------
   const roleName = user.role ? user.role.name : null;
   if (
     user.is_active &&
@@ -91,7 +91,6 @@ const login = async ({ email, password, ipAddress, userAgent }) => {
       'Your account was deactivated after 30 days of inactivity. Please use the contact form to request reactivation.'
     );
   }
-  // ---------------------------------------------------------------------------
 
   if (!user.is_active) throw new ApiError(403, 'Account is disabled');
 
@@ -265,6 +264,7 @@ const updateMe = async ({ userId, patch }) => {
     }],
   });
   if (!user) throw new ApiError(404, 'User not found');
+  const previousAvatarUrl = user.avatar_url; // captured BEFORE the loop below overwrites it, for cleanup
 
   const WRITABLE = [
     'display_name',
@@ -309,14 +309,22 @@ const updateMe = async ({ userId, patch }) => {
 
   await user.save(); // model validators (e.g. avatar_url URL check) run here
 
+  if (incoming.avatar_url !== undefined && previousAvatarUrl && previousAvatarUrl !== user.avatar_url) {
+    deleteImageFile(previousAvatarUrl);
+  }
+
   const permissions = user.role && user.role.permissions
     ? user.role.permissions.map((p) => p.key)
     : [];
   return publicUser(user, permissions);
 };
 
-// PATCH /auth/me/username — dedicated handle change. No rate limit (for now).
-// Uniqueness (409) and format (400) are enforced; a no-op change is rejected.
+// POST /auth/me/avatar 
+const buildAvatarImageUrl = (file) => ({
+  url: publicImageUrl('avatars', file.filename),
+});
+
+// PATCH /auth/me/username 
 const changeUsername = async ({ userId, newUsername }) => {
   const user = await db.User.findByPk(userId);
   if (!user) throw new ApiError(404, 'User not found');
@@ -403,4 +411,5 @@ module.exports = {
   updateMe,
   changeUsername,
   deleteMe,
+  buildAvatarImageUrl,
 };
