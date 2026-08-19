@@ -10,7 +10,7 @@ const playService = require('../services/playService');
 const uploadSong = catchAsync(async (req, res) => {
   if (!req.file) throw new ApiError(400, 'audio file is required');
 
-  const { title, albumId, trackNumber, durationSeconds, genreIds } = req.body;
+  const { title, albumId, trackNumber, durationSeconds, genreIds, publish } = req.body;
 
   const result = await songService.createSong({
     actor: req.user,
@@ -18,8 +18,9 @@ const uploadSong = catchAsync(async (req, res) => {
     albumId,
     trackNumber,
     durationSeconds,
-    genreIds, // may arrive as array or comma string; service normalizes
-    file: req.file, // { filename, path, mimetype, size, ... }
+    genreIds,
+    publish, 
+    file: req.file, 
   });
   return success(res, 201, 'Song uploaded', result);
 });
@@ -90,8 +91,6 @@ const deleteSong = catchAsync(async (req, res) => {
 });
 
 // POST /api/songs/:id/play — record a play.
-// Fire-and-forget from the client's point of view: the player doesn't block on
-// this, it just reports that a play happened.
 const recordPlay = catchAsync(async (req, res) => {
   const { msPlayed, source } = req.body;
   const result = await playService.recordPlay({

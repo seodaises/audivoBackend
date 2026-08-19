@@ -48,7 +48,7 @@ module.exports = (sequelize, DataTypes) => {
       status: {
         type: DataTypes.ENUM('draft', 'published', 'archived', 'scheduled'),
         allowNull: false,
-        defaultValue: 'draft', // listeners see 'published' only
+        defaultValue: 'draft',
       },
       archived_by: {
         type: DataTypes.ENUM('artist', 'admin'),
@@ -57,21 +57,31 @@ module.exports = (sequelize, DataTypes) => {
       },
       release_date: {
         type: DataTypes.DATEONLY,
-        allowNull: true, // human-facing display date only
+        allowNull: true,
       },
       release_at: {
         type: DataTypes.DATE,
-        allowNull: true, // UTC trigger instant for a scheduled release; NULL otherwise
+        allowNull: true,
       },
       prerelease_notified_at: {
         type: DataTypes.DATE,
         allowNull: true,
         defaultValue: null,
       },
+      release_job_id: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+        defaultValue: null,
+      },
+      prerelease_job_id: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+        defaultValue: null,
+      },
       is_single: {
         type: DataTypes.BOOLEAN,
         allowNull: false,
-        defaultValue: false, // a standalone single is a 1-track album with this flag set
+        defaultValue: false, 
       },
     },
     {

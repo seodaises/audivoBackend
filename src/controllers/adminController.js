@@ -98,6 +98,20 @@ const revokePermission = catchAsync(async (req, res) => {
   return success(res, 200, 'Permission revoked', result);
 });
 
+// GET /api/admin/active-sessions?minutes= 
+const listActiveSessions = catchAsync(async (req, res) => {
+  const { minutes } = req.query;
+  const result = await adminService.listActiveSessions({ minutes });
+  return success(res, 200, 'Active sessions retrieved', result);
+});
+
+// GET /api/admin/active-sessions/count?minutes=  — Admin+. Count only.
+const getActiveSessionsCount = catchAsync(async (req, res) => {
+  const { minutes } = req.query;
+  const result = await adminService.countActiveSessions({ minutes });
+  return success(res, 200, 'Active session count retrieved', result);
+});
+
 // GET /api/admin/metrics  — user counts per role (Super Admin bucket hidden from Admins). req.user.level is set by requireMinLevel.
 const getMetrics = catchAsync(async (req, res) => {
   const result = await adminService.getMetrics({ actorLevel: req.user.level });
@@ -133,6 +147,8 @@ module.exports = {
   listRolesWithPermissions,
   grantPermission,
   revokePermission,
+  listActiveSessions,
+  getActiveSessionsCount,
   getMetrics,
   listContactMessages,
   setContactStatus,

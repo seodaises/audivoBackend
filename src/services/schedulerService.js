@@ -2,6 +2,7 @@
 
 const db = require('../models');
 const notificationService = require('./notificationService');
+const releaseQueue = require('../queues/releaseQueue');
 
 const PRERELEASE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -12,6 +13,62 @@ const isWithinPrereleaseWindow = (when, from = new Date()) => {
   const base = from.getTime();
   return t > base && t <= base + PRERELEASE_WINDOW_MS;
 };
+
+const publishScheduledAlbum = async (albumId) => {
+  const { Op } = db.Sequelize;
+  const album = await db.Album.findByPk(albumId);
+  if (!album) return { published: false, reason: 'not_found' };
+  if (album.status !== 'scheduled') return { published: false, reason: 'not_scheduled' };
+
+  await db.sequelize.transaction(async (t) => {
+    album.status = 'published';
+    album.release_at = null; 
+    album.release_job_id = null;
+    album.prerelease_job_id = null; 
+    await album.save({ transaction: t });
+
+    await db.Song.update(
+      { status: 'published', archived_by: null },
+      {
+        where: {
+          album_id: album.id,
+          [Op.or]: [
+            { status: 'draft', held_back: false },
+            { status: 'archived', archived_by: 'album' },
+          ],
+        },
+        transaction: t,
+      }
+    );
+  });
+  await releaseQueue.removeJobIfExists(album.prerelease_job_id).catch(() => {});
+
+  await notificationService.emitRelease({
+    artistProfileId: album.artist_profile_id,
+    albumId: album.id,
+  });
+
+  return { published: true };
+};
+
+const sendPrereleaseNotification = async (albumId) => {
+  const album = await db.Album.findByPk(albumId);
+  if (!album) return { notified: false, reason: 'not_found' };
+  if (album.status !== 'scheduled') return { notified: false, reason: 'not_scheduled' };
+  if (album.prerelease_notified_at) return { notified: false, reason: 'already_notified' };
+
+  album.prerelease_notified_at = new Date();
+  album.prerelease_job_id = null;
+  await album.save();
+
+  await notificationService.emitUpcomingRelease({
+    artistProfileId: album.artist_profile_id,
+    albumId: album.id,
+  });
+
+  return { notified: true };
+};
+
 
 const runDueReleases = async () => {
   const { Op } = db.Sequelize;
@@ -28,32 +85,9 @@ const runDueReleases = async () => {
 
   for (const album of due) {
     try {
-      await db.sequelize.transaction(async (t) => {
-        album.status = 'published';
-        album.release_at = null; // trigger consumed; don't let it re-fire
-        await album.save({ transaction: t });
-
-        await db.Song.update(
-          { status: 'published', archived_by: null },
-          {
-            where: {
-              album_id: album.id,
-              [Op.or]: [
-                { status: 'draft' },
-                { status: 'archived', archived_by: 'album' },
-              ],
-            },
-            transaction: t,
-          }
-        );
-      });
-      published += 1;
-      await notificationService.emitRelease({
-        artistProfileId: album.artist_profile_id,
-        albumId: album.id,
-      });
+      const result = await publishScheduledAlbum(album.id);
+      if (result.published) published += 1;
     } catch (err) {
-
       console.error(
         `[scheduler] failed to publish scheduled album ${album.id}:`,
         err.message
@@ -62,8 +96,7 @@ const runDueReleases = async () => {
   }
 
   if (published > 0) {
-
-    console.log(`[scheduler] published ${published} scheduled album(s)`);
+    console.log(`[scheduler] published ${published} scheduled album(s) (safety-net sweep)`);
   }
 
   return { checked: due.length, published };
@@ -86,14 +119,8 @@ const runDuePrereleases = async () => {
 
   for (const album of due) {
     try {
-      album.prerelease_notified_at = new Date();
-      await album.save();
-
-      await notificationService.emitUpcomingRelease({
-        artistProfileId: album.artist_profile_id,
-        albumId: album.id,
-      });
-      notified += 1;
+      const result = await sendPrereleaseNotification(album.id);
+      if (result.notified) notified += 1;
     } catch (err) {
       console.error(
         `[scheduler] pre-release heads-up failed for album ${album.id}:`,
@@ -103,13 +130,15 @@ const runDuePrereleases = async () => {
   }
 
   if (notified > 0) {
-    console.log(`[scheduler] sent pre-release heads-up for ${notified} album(s)`);
+    console.log(`[scheduler] sent pre-release heads-up for ${notified} album(s) (safety-net sweep)`);
   }
 
   return { checked: due.length, notified };
 };
 
 module.exports = {
+  publishScheduledAlbum,
+  sendPrereleaseNotification,
   runDueReleases,
   runDuePrereleases,
   isWithinPrereleaseWindow,

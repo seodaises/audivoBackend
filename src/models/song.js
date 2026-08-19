@@ -76,6 +76,11 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
         defaultValue: null,
       },
+      held_back: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
       play_count: {
         type: DataTypes.INTEGER,
         allowNull: false,

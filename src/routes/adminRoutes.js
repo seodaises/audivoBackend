@@ -28,6 +28,23 @@ router.patch('/users/:id/status', protect, requireMinLevel(ADMIN), validate(v.se
 // Soft-delete an account (row survives; hidden everywhere + login blocked).
 router.patch('/users/:id/delete', protect, requireMinLevel(ADMIN), validate(v.deleteUser), adminController.deleteUser);
 
+// "Who's online right now" 
+router.get(
+  '/active-sessions',
+  protect,
+  requireMinLevel(SUPER_ADMIN),
+  validate(v.activeSessionsWindow),
+  adminController.listActiveSessions
+);
+
+router.get(
+  '/active-sessions/count',
+  protect,
+  requireMinLevel(ADMIN),
+  validate(v.activeSessionsWindow),
+  adminController.getActiveSessionsCount
+);
+
 router.get(
   '/metrics',
   protect,

@@ -9,6 +9,7 @@ const { COVER_DIR, AVATAR_DIR } = require('./config/storage');
 const routes = require('./routes');
 const { startReleaseScheduler } = require('./jobs/releaseScheduler');
 const { startLyricsWorker } = require('./workers/lyricsWorker');
+const { startReleaseWorker } = require('./workers/releaseWorker');
 
 const app = express();
 
@@ -54,4 +55,5 @@ app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   startReleaseScheduler();
   startLyricsWorker();
+  startReleaseWorker();
 });

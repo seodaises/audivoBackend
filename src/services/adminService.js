@@ -5,6 +5,7 @@ const ApiError = require('../utils/ApiError');
 const { hashPassword, generateTempPassword } = require('../utils/password');
 const { sendTempPasswordEmail } = require('./emailService');
 const { cascadeUserSoftDelete } = require('./userCascade');
+const presenceService = require('./presenceService');
 const MAX_ASSIGNABLE_LEVEL = 4; // Admin
 const CREATABLE_ROLES = ['Admin']; 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
@@ -338,8 +339,6 @@ const contactMessageRow = (m) => ({
     : null,
 });
 
-// Eager-load the resolving admin on every contact read, so the list and the
-// single-row response share one shape.
 const CONTACT_INCLUDE = [
   {
     model: db.User,
@@ -407,6 +406,39 @@ const setContactStatus = async ({ actor, messageId, status }) => {
 
   const fresh = await db.ContactMessage.findByPk(message.id, { include: CONTACT_INCLUDE });
   return contactMessageRow(fresh);
+};
+
+const listActiveSessions = async ({ minutes } = {}) => {
+  const result = await presenceService.listActiveUsers({ minutes });
+  if (!result.items.length) return result;
+  const userIds = result.items.map((u) => u.id);
+  const logins = await db.LoginHistory.findAll({
+    where: { user_id: userIds },
+    order: [['created_at', 'DESC']],
+    attributes: ['user_id', 'ip_address', 'created_at'],
+  });
+
+  const lastLoginByUserId = new Map();
+  for (const row of logins) {
+    if (!lastLoginByUserId.has(row.user_id)) {
+      lastLoginByUserId.set(row.user_id, {
+        at: row.created_at,
+        ipAddress: row.ip_address,
+      });
+    }
+  }
+
+  const items = result.items.map((u) => ({
+    ...u,
+    lastLoginAt: lastLoginByUserId.get(u.id)?.at ?? null,
+    lastLoginIp: lastLoginByUserId.get(u.id)?.ipAddress ?? null,
+  }));
+
+  return { ...result, items };
+};
+
+const countActiveSessions = async ({ minutes } = {}) => {
+  return presenceService.countActiveUsers({ minutes });
 };
 
 const getMetrics = async ({ actorLevel }) => {
@@ -656,4 +688,6 @@ module.exports = {
   getMetrics,
   listContactMessages,
   setContactStatus,
+  listActiveSessions,
+  countActiveSessions,
 };

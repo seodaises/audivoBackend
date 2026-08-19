@@ -4,6 +4,7 @@ const ApiError = require('../utils/ApiError');
 const { verifyToken } = require('../utils/jwt');
 const catchAsync = require('../utils/catchAsync');
 const { COOKIE_NAME, clearAuthCookie } = require('../utils/authCookie');
+const presenceService = require('../services/presenceService');
 
 const protect = catchAsync(async (req, res, next) => {
   // Token now travels in an httpOnly cookie (set at login), not the
@@ -39,7 +40,8 @@ const protect = catchAsync(async (req, res, next) => {
     throw new ApiError(403, 'Account is disabled');
   }
 
-  // Hand the controller a trimmed identity — never the password hash.
+  presenceService.touch(user.id);
+
   req.user = {
     id: user.id,
     email: user.email,
