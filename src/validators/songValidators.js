@@ -1,24 +1,6 @@
 'use strict';
 const Joi = require('joi');
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Song validation schemas.
-//
-// A wrinkle unique to songs: the upload route is MULTIPART. Every body value
-// arrives as a STRING (multipart has no types), so these schemas lean on
-// convert:true to coerce "3" -> 3. Two fields need special care:
-//
-//   • The audio FILE is not validated here — Joi never sees req.file. The
-//     "file is required" check stays in the controller, where multer put it.
-//   • genreIds on UPLOAD may be an array, a comma-string, or a JSON string —
-//     the service's normalizeGenreIds() is built to swallow all three. So we
-//     validate it loosely (allow string or array) and let the service parse.
-//     On the dedicated PUT /:id/genres route we're stricter (real array).
-//
-// status values mirror songService.VALID_STATUSES = draft|published|archived
-// (note: NOT 'scheduled' — that's an album-only concept).
-// ─────────────────────────────────────────────────────────────────────────────
-
 const idParam = {
   params: Joi.object({
     id: Joi.number().integer().positive().required().messages({
@@ -44,19 +26,23 @@ const durationSeconds = Joi.number().integer().min(1).max(86400).messages({
   'number.min': 'durationSeconds must be at least 1',
 });
 
-// Loose genreIds for multipart upload: array of ints, OR a string the service
-// will split/parse. Empty/absent is fine (a song can start genre-less).
-const genreIdsLoose = Joi.alternatives().try(
-  Joi.array().items(Joi.number().integer().positive()),
-  Joi.string().allow('') // "1,2,3" or "[1,2,3]" — service normalizes
-);
-
-// Strict genreIds for the dedicated replace-genres endpoint.
+const genreIdsLoose = Joi.alternatives()
+  .try(
+    Joi.array().items(Joi.number().integer().positive()).min(1),
+    Joi.string().trim().min(1), // "1,2,3" or "[1,2,3]" — service normalizes
+  )
+  .required()
+  .messages({
+    'alternatives.match': 'genreIds is required — pick at least one genre',
+    'any.required': 'genreIds is required — pick at least one genre',
+  });
 const genreIdsStrict = Joi.array()
   .items(Joi.number().integer().positive())
+  .min(1)
   .required()
   .messages({
     'array.base': 'genreIds must be an array',
+    'array.min': 'genreIds must contain at least one genre',
     'any.required': 'genreIds must be an array',
   });
 
@@ -75,7 +61,8 @@ const uploadSong = {
     }),
     trackNumber: trackNumber.optional(),
     durationSeconds: durationSeconds.optional(),
-    genreIds: genreIdsLoose.optional(),
+    genreIds: genreIdsLoose, 
+    publish: Joi.boolean().optional(),
   }),
 };
 

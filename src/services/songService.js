@@ -17,6 +17,7 @@ const songRow = (s) => ({
   status: s.status,
   archivedBy: s.archived_by ?? null, // 'artist' | 'admin' | 'album' | null
   isLocked: s.status === 'archived' && s.archived_by === 'admin',
+  heldBack: s.held_back, // true = artist deliberately kept this draft out of the album's release cascade
   playCount: s.play_count,
   createdAt: s.created_at,
 });
@@ -43,8 +44,9 @@ const loadOwnedSong = async (actor, songId) => {
   return { profile, song };
 };
 
-const createSong = async ({ actor, title, albumId, trackNumber, durationSeconds, genreIds, file }) => {
+const createSong = async ({ actor, title, albumId, trackNumber, durationSeconds, genreIds, publish, file }) => {
   const storageKey = file.filename;
+  const heldBack = publish === false;
 
   try {
     const profile = await requireOwnProfile(actor, { mustBeVerified: true });
@@ -60,12 +62,12 @@ const createSong = async ({ actor, title, albumId, trackNumber, durationSeconds,
     }
 
     const wantedGenreIds = normalizeGenreIds(genreIds);
-    let validGenres = [];
-    if (wantedGenreIds.length) {
-      validGenres = await db.Genre.findAll({ where: { id: wantedGenreIds } });
-      if (validGenres.length !== wantedGenreIds.length) {
-        throw new ApiError(400, 'One or more genreIds are invalid');
-      }
+    if (wantedGenreIds.length === 0) {
+      throw new ApiError(400, 'At least one genre is required');
+    }
+    const validGenres = await db.Genre.findAll({ where: { id: wantedGenreIds } });
+    if (validGenres.length !== wantedGenreIds.length) {
+      throw new ApiError(400, 'One or more genreIds are invalid');
     }
 
     const result = await db.sequelize.transaction(async (t) => {
@@ -93,6 +95,7 @@ const createSong = async ({ actor, title, albumId, trackNumber, durationSeconds,
           duration_seconds: durationSeconds != null ? Number(durationSeconds) : null,
           track_number: trackNumber != null ? Number(trackNumber) : null,
           // status defaults to 'draft'; archived_by stays NULL
+          held_back: heldBack,
         },
         { transaction: t }
       );
@@ -156,6 +159,7 @@ const setStatus = async ({ actor, songId, status }) => {
 
   song.status = status;
   song.archived_by = status === 'archived' ? 'artist' : null;
+  song.held_back = status === 'draft';
   await song.save();
   return songRow(song);
 };
@@ -185,13 +189,12 @@ const deleteSong = async ({ actor, songId, password }) => {
 const setGenres = async ({ actor, songId, genreIds }) => {
   const { song } = await loadOwnedSong(actor, songId);
   const wanted = normalizeGenreIds(genreIds);
-
-  let validGenres = [];
-  if (wanted.length) {
-    validGenres = await db.Genre.findAll({ where: { id: wanted } });
-    if (validGenres.length !== wanted.length) {
-      throw new ApiError(400, 'One or more genreIds are invalid');
-    }
+  if (wanted.length === 0) {
+    throw new ApiError(400, 'At least one genre is required');
+  }
+  const validGenres = await db.Genre.findAll({ where: { id: wanted } });
+  if (validGenres.length !== wanted.length) {
+    throw new ApiError(400, 'One or more genreIds are invalid');
   }
 
   await db.sequelize.transaction(async (t) => {

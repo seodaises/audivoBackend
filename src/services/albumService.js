@@ -5,7 +5,8 @@ const { requireOwnProfile } = require('./artistProfileService');
 const { deleteAudioFile, publicImageUrl, deleteImageFile } = require('../config/storage');
 const { comparePassword } = require('../utils/password');
 const notificationService = require('./notificationService');
-const { isWithinPrereleaseWindow } = require('./schedulerService');
+const { PRERELEASE_WINDOW_MS } = require('./schedulerService');
+const releaseQueue = require('../queues/releaseQueue');
 
 const VALID_STATUSES = ['draft', 'published', 'archived'];
 
@@ -105,7 +106,9 @@ const setStatus = async ({ actor, albumId, status }) => {
           where: {
             album_id: album.id,
             [Op.or]: [
-              { status: 'draft' },
+              // Same fix as schedulerService.publishScheduledAlbum: skip
+              // songs the artist deliberately held back as drafts.
+              { status: 'draft', held_back: false },
               { status: 'archived', archived_by: 'album' },
             ],
           },
@@ -153,22 +156,21 @@ const scheduleRelease = async ({ actor, albumId, releaseAt }) => {
   if (album.status === 'archived') {
     throw new ApiError(400, 'Unarchive this album before scheduling it');
   }
+  await releaseQueue.removeJobIfExists(album.release_job_id);
+  await releaseQueue.removeJobIfExists(album.prerelease_job_id);
 
   album.status = 'scheduled';
   album.release_at = when;
+  album.release_date = when.toISOString().slice(0, 10);
   album.prerelease_notified_at = null;
 
-  const fireHeadsUpNow = isWithinPrereleaseWindow(when);
-  if (fireHeadsUpNow) album.prerelease_notified_at = new Date();
+  const releaseDelayMs = when.getTime() - Date.now();
+  album.release_job_id = await releaseQueue.enqueuePublish(album.id, releaseDelayMs);
+
+  const prereleaseDelayMs = when.getTime() - PRERELEASE_WINDOW_MS - Date.now();
+  album.prerelease_job_id = await releaseQueue.enqueuePrereleaseNotify(album.id, prereleaseDelayMs);
 
   await album.save();
-
-  if (fireHeadsUpNow) {
-    await notificationService.emitUpcomingRelease({
-      artistProfileId: album.artist_profile_id,
-      albumId: album.id,
-    });
-  }
 
   return albumRow(album);
 };
@@ -180,9 +182,14 @@ const cancelSchedule = async ({ actor, albumId }) => {
     throw new ApiError(400, 'This album is not scheduled');
   }
 
+  await releaseQueue.removeJobIfExists(album.release_job_id);
+  await releaseQueue.removeJobIfExists(album.prerelease_job_id);
+
   album.status = 'draft';
   album.release_at = null;
   album.prerelease_notified_at = null;
+  album.release_job_id = null;
+  album.prerelease_job_id = null;
   await album.save();
 
   return albumRow(album);

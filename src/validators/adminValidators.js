@@ -2,19 +2,6 @@
 const Joi = require('joi');
 const { idParam, pagination } = require('./commonValidators');
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Admin validation. This is the most authority-sensitive surface, so the split
-// between SHAPE (here) and AUTHORIZATION (service) matters most:
-//
-//   Joi here:   "is 'role' one of the five real role names?"  (400 on a typo)
-//   Service:    "may THIS actor assign that role to THAT target?" — level checks,
-//               self-role guard, Super-Admin lock. Those stay in adminService as
-//               403s, because only the service knows the actor's level and the
-//               target's current role.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// The five real roles. Validating the NAME is shape; whether it's ASSIGNABLE by
-// the caller is the service's job.
 const roleName = Joi.string()
   .valid('Super Admin', 'Admin', 'Moderator', 'Artist', 'Listener')
   .messages({
@@ -22,7 +9,6 @@ const roleName = Joi.string()
     'any.required': 'role is required',
   });
 
-// Permission keys are lowercase snake_case tokens (manage_users, view_analytics…).
 const permissionKey = Joi.string()
   .trim()
   .pattern(/^[a-z][a-z0-9_]*$/)
@@ -35,6 +21,17 @@ const permissionKey = Joi.string()
 
 // GET /admin/users
 const listUsers = { query: pagination };
+
+// GET /admin/active-sessions & /admin/active-sessions/count 
+const activeSessionsWindow = {
+  query: Joi.object({
+    minutes: Joi.number().integer().min(1).max(1440).optional().messages({
+      'number.base': 'minutes must be a number',
+      'number.min': 'minutes must be at least 1',
+      'number.max': 'minutes must be at most 1440 (24 hours)',
+    }),
+  }),
+};
 
 // GET /admin/admins
 const listAdmins = { query: pagination };
@@ -116,6 +113,7 @@ module.exports = {
   setStatus,
   deleteUser,
   rolePermission,
+  activeSessionsWindow,
   listContactMessages,
   setContactStatus,
 };
